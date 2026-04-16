@@ -227,6 +227,11 @@ public sealed class TtdStore : IStore
     public IReadOnlyList<TtdMemoryAccess> GetMemoryAccesses(
         string startAddrHex, string endAddrHex, string mode, int maxRecords = 200) => WithSession(session =>
     {
+        // dx parses unprefixed numeric literals as decimal. Path-form addresses
+        // are conventionally hex ("1a373fa3d50_1a373fa3e50"), so a missing 0x
+        // used to silently return zero records. Normalize here.
+        startAddrHex = EnsureHexPrefix(startAddrHex);
+        endAddrHex = EnsureHexPrefix(endAddrHex);
         var result = new List<TtdMemoryAccess>();
         var baseExpr = $"@$cursession.TTD.Memory({startAddrHex}, {endAddrHex}, \"{mode}\")";
 
@@ -439,6 +444,9 @@ public sealed class TtdStore : IStore
                 System.Globalization.CultureInfo.InvariantCulture);
         return ulong.TryParse(s, out var v) ? v : 0;
     }
+
+    private static string EnsureHexPrefix(string addr) =>
+        addr.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? addr : "0x" + addr;
 
     /// <summary>
     /// Parse the multi-line "dx .Select(t => t.Id)" output, extracting the
