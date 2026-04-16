@@ -114,5 +114,89 @@
       </TableControl>
     </View>
 
+    <View>
+      <Name>ThreadItem</Name>
+      <ViewSelectedBy>
+        <TypeName>CrashDrive.Models.ThreadItem</TypeName>
+      </ViewSelectedBy>
+      <GroupBy>
+        <PropertyName>Directory</PropertyName>
+      </GroupBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>MgdId</Label><Width>6</Width><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>OSId</Label><Width>6</Width><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Frames</Label><Width>7</Width><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Flags</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Exception</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>ManagedThreadId</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>OSThreadId</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>FrameCount</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>($(if ($_.IsAlive){'A'}else{'.'}) + $(if ($_.IsFinalizer){'F'}else{'.'}))</ScriptBlock></TableColumnItem>
+              <TableColumnItem><PropertyName>ExceptionSummary</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <View>
+      <Name>FrameItem</Name>
+      <ViewSelectedBy>
+        <TypeName>CrashDrive.Models.FrameItem</TypeName>
+      </ViewSelectedBy>
+      <GroupBy>
+        <PropertyName>Directory</PropertyName>
+      </GroupBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>#</Label><Width>4</Width><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Kind</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>IP</Label><Width>18</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Method</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Index</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Kind</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>IpHex</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Method</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <View>
+      <Name>ModuleItem</Name>
+      <ViewSelectedBy>
+        <TypeName>CrashDrive.Models.ModuleItem</TypeName>
+      </ViewSelectedBy>
+      <GroupBy>
+        <PropertyName>Directory</PropertyName>
+      </GroupBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Name</Label><Width>40</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Size</Label><Width>10</Width><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>ImageBase</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>FileName</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Size</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>ImageBaseHex</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
   </ViewDefinitions>
 </Configuration>

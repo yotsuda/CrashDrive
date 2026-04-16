@@ -55,6 +55,17 @@ public enum CrashPathType
     ExceptionContextFile,       // exceptions\<index>\context.json
     ExceptionStackFile,         // exceptions\<index>\stack.txt
 
+    // Dump-specific
+    ThreadsFolder,              // threads\
+    ThreadFolder,               // threads\<id>
+    ThreadInfoFile,             // threads\<id>\info.json
+    ThreadStackFile,            // threads\<id>\stack.txt
+    ThreadFramesFolder,         // threads\<id>\frames
+    FrameFile,                  // threads\<id>\frames\<n>.json
+    ModulesFolder,              // modules\
+    ModuleFile,                 // modules\<filename>.json
+    DumpInfoFile,               // info.json (dump-side summary separate from summary.json)
+
     Invalid,
 }
 
@@ -66,6 +77,9 @@ public sealed class CrashPathInfo
     public int? Seq { get; init; }
     public string? Category { get; init; }     // for ByType/ByFunction category name
     public int? ExceptionIndex { get; init; }
+    public int? ThreadId { get; init; }
+    public int? FrameIndex { get; init; }
+    public string? ModuleFile { get; init; }
 
     public bool IsContainer => Type switch
     {
@@ -77,6 +91,10 @@ public sealed class CrashPathInfo
         CrashPathType.ByTypeCategoryFolder => true,
         CrashPathType.ByFunctionCategoryFolder => true,
         CrashPathType.ExceptionFolder => true,
+        CrashPathType.ThreadsFolder => true,
+        CrashPathType.ThreadFolder => true,
+        CrashPathType.ThreadFramesFolder => true,
+        CrashPathType.ModulesFolder => true,
         _ => false,
     };
 }
@@ -100,12 +118,15 @@ public static class CrashPathParser
             return head switch
             {
                 "summary.json" => new CrashPathInfo { Type = CrashPathType.SummaryFile, Segments = segments },
+                "info.json" => new CrashPathInfo { Type = CrashPathType.DumpInfoFile, Segments = segments },
                 "stdout.txt" => new CrashPathInfo { Type = CrashPathType.StdoutFile, Segments = segments },
                 "stderr.txt" => new CrashPathInfo { Type = CrashPathType.StderrFile, Segments = segments },
                 "events" => new CrashPathInfo { Type = CrashPathType.EventsFolder, Segments = segments },
                 "by-type" => new CrashPathInfo { Type = CrashPathType.ByTypeFolder, Segments = segments },
                 "by-function" => new CrashPathInfo { Type = CrashPathType.ByFunctionFolder, Segments = segments },
                 "exceptions" => new CrashPathInfo { Type = CrashPathType.ExceptionsFolder, Segments = segments },
+                "threads" => new CrashPathInfo { Type = CrashPathType.ThreadsFolder, Segments = segments },
+                "modules" => new CrashPathInfo { Type = CrashPathType.ModulesFolder, Segments = segments },
                 _ => new CrashPathInfo { Type = CrashPathType.Invalid, Segments = segments },
             };
         }
@@ -116,8 +137,45 @@ public static class CrashPathParser
             "by-type" => ParseByType(segments),
             "by-function" => ParseByFunction(segments),
             "exceptions" => ParseExceptions(segments),
+            "threads" => ParseThreads(segments),
+            "modules" => ParseModules(segments),
             _ => new CrashPathInfo { Type = CrashPathType.Invalid, Segments = segments },
         };
+    }
+
+    private static CrashPathInfo ParseThreads(string[] segments)
+    {
+        // threads\<id>[\info.json | stack.txt | frames[\<n>.json]]
+        if (segments.Length < 2) return Invalid(segments);
+        if (!int.TryParse(segments[1], out var tid)) return Invalid(segments);
+
+        if (segments.Length == 2)
+            return new() { Type = CrashPathType.ThreadFolder, Segments = segments, ThreadId = tid };
+
+        var sub = segments[2].ToLowerInvariant();
+        if (segments.Length == 3)
+        {
+            return sub switch
+            {
+                "info.json" => new() { Type = CrashPathType.ThreadInfoFile, Segments = segments, ThreadId = tid },
+                "stack.txt" => new() { Type = CrashPathType.ThreadStackFile, Segments = segments, ThreadId = tid },
+                "frames" => new() { Type = CrashPathType.ThreadFramesFolder, Segments = segments, ThreadId = tid },
+                _ => Invalid(segments),
+            };
+        }
+        if (segments.Length == 4 && sub == "frames" && TryParseSeqFile(segments[3], out var frameN))
+        {
+            return new() { Type = CrashPathType.FrameFile, Segments = segments, ThreadId = tid, FrameIndex = frameN };
+        }
+        return Invalid(segments);
+    }
+
+    private static CrashPathInfo ParseModules(string[] segments)
+    {
+        // modules\<filename>.json
+        if (segments.Length != 2) return Invalid(segments);
+        if (!segments[1].EndsWith(".json", StringComparison.OrdinalIgnoreCase)) return Invalid(segments);
+        return new() { Type = CrashPathType.ModuleFile, Segments = segments, ModuleFile = segments[1][..^5] };
     }
 
     private static CrashPathInfo ParseEvents(string[] segments)

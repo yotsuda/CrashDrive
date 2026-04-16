@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CrashDrive.Store;
 
 namespace CrashDrive.Trace;
 
@@ -8,13 +9,16 @@ namespace CrashDrive.Trace;
 /// fast even for GB-scale trace files; the heavy index build only fires when
 /// the user actually navigates to events/, exceptions/, by-function/, etc.
 /// </summary>
-public sealed class TraceStore
+public sealed class TraceStore : IStore
 {
     private readonly Lazy<IndexedData> _index;
 
     public string FilePath { get; }
     public long FileSizeBytes { get; }
     public DateTime LastWriteTime { get; }
+    public StoreKind Kind => StoreKind.Trace;
+
+    public void Dispose() { /* in-memory only, nothing to release */ }
 
     public TraceStore(string path)
     {
@@ -32,6 +36,8 @@ public sealed class TraceStore
 
     /// <summary>Whether the heavy index has already been built.</summary>
     public bool IsIndexed => _index.IsValueCreated;
+
+    bool IStore.IsLoaded => _index.IsValueCreated;
 
     // All of the below force lazy evaluation.
     public IReadOnlyList<TraceEvent> Events => _index.Value.Events;

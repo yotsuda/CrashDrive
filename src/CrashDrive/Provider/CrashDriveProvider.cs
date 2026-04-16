@@ -167,12 +167,49 @@ public sealed class CrashDriveProvider : NavigationCmdletProvider, IContentCmdle
         {
             case CrashPathType.Root:
                 yield return ("summary.json", false);
-                yield return ("stdout.txt", false);
-                yield return ("stderr.txt", false);
-                yield return ("events", true);
-                yield return ("by-type", true);
-                yield return ("by-function", true);
-                yield return ("exceptions", true);
+                if (Drive.Store.Kind == Store.StoreKind.Trace)
+                {
+                    yield return ("stdout.txt", false);
+                    yield return ("stderr.txt", false);
+                    yield return ("events", true);
+                    yield return ("by-type", true);
+                    yield return ("by-function", true);
+                    yield return ("exceptions", true);
+                }
+                else if (Drive.Store.Kind == Store.StoreKind.Dump)
+                {
+                    yield return ("info.json", false);
+                    yield return ("threads", true);
+                    yield return ("modules", true);
+                }
+                break;
+
+            case CrashPathType.ThreadsFolder:
+                if (Drive.AsDump is { } dAll)
+                    foreach (var t in dAll.Threads)
+                        yield return (t.ManagedThreadId.ToString(), true);
+                break;
+
+            case CrashPathType.ThreadFolder:
+                yield return ("info.json", false);
+                yield return ("stack.txt", false);
+                yield return ("frames", true);
+                break;
+
+            case CrashPathType.ThreadFramesFolder:
+                if (Drive.AsDump is { } dFr && info.ThreadId is int tid1)
+                {
+                    var thread = dFr.Threads.FirstOrDefault(t => t.ManagedThreadId == tid1);
+                    if (thread != null)
+                        for (int i = 0; i < thread.Frames.Count; i++)
+                            yield return ($"{i}.json", false);
+                }
+                break;
+
+            case CrashPathType.ModulesFolder:
+                if (Drive.AsDump is { } dM)
+                    foreach (var m in dM.Modules)
+                        yield return ($"{SanitizeFileName(m.FileName)}.json", false);
                 break;
 
             case CrashPathType.EventsFolder:
@@ -220,16 +257,109 @@ public sealed class CrashDriveProvider : NavigationCmdletProvider, IContentCmdle
         {
             case CrashPathType.Root:
                 WriteFile("summary.json", MakePath(path, "summary.json"), directory);
-                WriteFile("stdout.txt", MakePath(path, "stdout.txt"), directory);
-                WriteFile("stderr.txt", MakePath(path, "stderr.txt"), directory);
-                WriteFolder(path, "events", MakePath(path, "events"), directory,
-                    "all events by sequence", Drive.Trace.Summary.TotalEvents);
-                WriteFolder(path, "by-type", MakePath(path, "by-type"), directory,
-                    "events grouped by type", Drive.Trace.ByType.Count);
-                WriteFolder(path, "by-function", MakePath(path, "by-function"), directory,
-                    "events grouped by function", Drive.Trace.ByFunction.Count);
-                WriteFolder(path, "exceptions", MakePath(path, "exceptions"), directory,
-                    "exception occurrences with context", Drive.Trace.Exceptions.Count);
+                if (Drive.Store.Kind == Store.StoreKind.Trace)
+                {
+                    WriteFile("stdout.txt", MakePath(path, "stdout.txt"), directory);
+                    WriteFile("stderr.txt", MakePath(path, "stderr.txt"), directory);
+                    WriteFolder(path, "events", MakePath(path, "events"), directory,
+                        "all events by sequence", Drive.Trace.Summary.TotalEvents);
+                    WriteFolder(path, "by-type", MakePath(path, "by-type"), directory,
+                        "events grouped by type", Drive.Trace.ByType.Count);
+                    WriteFolder(path, "by-function", MakePath(path, "by-function"), directory,
+                        "events grouped by function", Drive.Trace.ByFunction.Count);
+                    WriteFolder(path, "exceptions", MakePath(path, "exceptions"), directory,
+                        "exception occurrences with context", Drive.Trace.Exceptions.Count);
+                }
+                else if (Drive.AsDump is { } rd)
+                {
+                    WriteFile("info.json", MakePath(path, "info.json"), directory);
+                    WriteFolder(path, "threads", MakePath(path, "threads"), directory,
+                        $"threads at time of dump", rd.Summary.ThreadCount);
+                    WriteFolder(path, "modules", MakePath(path, "modules"), directory,
+                        "loaded modules", rd.Summary.ModuleCount);
+                }
+                break;
+
+            case CrashPathType.ThreadsFolder:
+                if (Drive.AsDump is { } threadsDump)
+                {
+                    foreach (var t in threadsDump.Threads)
+                    {
+                        if (Stopping) return;
+                        var tPath = MakePath(path, t.ManagedThreadId.ToString());
+                        var item = new Models.ThreadItem
+                        {
+                            ManagedThreadId = t.ManagedThreadId,
+                            OSThreadId = t.OSThreadId,
+                            GCMode = t.GCMode,
+                            IsAlive = t.IsAlive,
+                            IsFinalizer = t.IsFinalizer,
+                            FrameCount = t.Frames.Count,
+                            ExceptionSummary = t.CurrentException != null
+                                ? $"{t.CurrentException.TypeName}: {t.CurrentException.Message}"
+                                : null,
+                            Path = EnsureDrivePrefix(tPath),
+                            Directory = directory,
+                        };
+                        WriteItemObject(item, tPath, isContainer: true);
+                    }
+                }
+                break;
+
+            case CrashPathType.ThreadFolder:
+                WriteFile("info.json", MakePath(path, "info.json"), directory);
+                WriteFile("stack.txt", MakePath(path, "stack.txt"), directory);
+                WriteFolder(path, "frames", MakePath(path, "frames"), directory,
+                    "stack frames", null);
+                break;
+
+            case CrashPathType.ThreadFramesFolder:
+                if (Drive.AsDump is { } framesDump && info.ThreadId is int tidFr)
+                {
+                    var thread = framesDump.Threads.FirstOrDefault(t => t.ManagedThreadId == tidFr);
+                    if (thread != null)
+                    {
+                        for (int i = 0; i < thread.Frames.Count; i++)
+                        {
+                            if (Stopping) return;
+                            var f = thread.Frames[i];
+                            var fPath = MakePath(path, $"{i}.json");
+                            var item = new Models.FrameItem
+                            {
+                                Index = i,
+                                Method = f.Method ?? "<unknown>",
+                                Module = f.Module,
+                                Kind = f.Kind,
+                                IpHex = $"0x{f.InstructionPointer:X16}",
+                                Path = EnsureDrivePrefix(fPath),
+                                Directory = directory,
+                            };
+                            WriteItemObject(item, fPath, isContainer: false);
+                        }
+                    }
+                }
+                break;
+
+            case CrashPathType.ModulesFolder:
+                if (Drive.AsDump is { } modDump)
+                {
+                    foreach (var m in modDump.Modules)
+                    {
+                        if (Stopping) return;
+                        var mPath = MakePath(path, $"{SanitizeFileName(m.FileName)}.json");
+                        var item = new Models.ModuleItem
+                        {
+                            Name = m.Name,
+                            FileName = m.FileName,
+                            Size = m.Size,
+                            ImageBaseHex = $"0x{m.ImageBase:X16}",
+                            IsDynamic = m.IsDynamic,
+                            Path = EnsureDrivePrefix(mPath),
+                            Directory = directory,
+                        };
+                        WriteItemObject(item, mPath, isContainer: false);
+                    }
+                }
                 break;
 
             case CrashPathType.EventsFolder:
@@ -328,7 +458,47 @@ public sealed class CrashDriveProvider : NavigationCmdletProvider, IContentCmdle
         switch (info.Type)
         {
             case CrashPathType.SummaryFile:
-                return JsonSerializer.Serialize(Drive.Trace.Summary, TraceJson.Options);
+                if (Drive.Store.Kind == Store.StoreKind.Trace)
+                    return JsonSerializer.Serialize(Drive.Trace.Summary, TraceJson.Options);
+                if (Drive.AsDump is { } dSum)
+                    return JsonSerializer.Serialize(dSum.Summary, TraceJson.Options);
+                return "{}";
+
+            case CrashPathType.DumpInfoFile:
+                if (Drive.AsDump is { } dInfo)
+                    return JsonSerializer.Serialize(dInfo.Summary, TraceJson.Options);
+                return "{}";
+
+            case CrashPathType.ThreadInfoFile:
+                if (Drive.AsDump is { } dTh && info.ThreadId is int tidI)
+                {
+                    var t = dTh.Threads.FirstOrDefault(x => x.ManagedThreadId == tidI);
+                    if (t != null) return JsonSerializer.Serialize(t, TraceJson.Options);
+                }
+                return "{}";
+
+            case CrashPathType.ThreadStackFile:
+                if (Drive.AsDump is { } dSt && info.ThreadId is int tidS)
+                    return RenderThreadStack(dSt, tidS);
+                return "";
+
+            case CrashPathType.FrameFile:
+                if (Drive.AsDump is { } dF && info.ThreadId is int tidF && info.FrameIndex is int fi)
+                {
+                    var t = dF.Threads.FirstOrDefault(x => x.ManagedThreadId == tidF);
+                    if (t != null && fi >= 0 && fi < t.Frames.Count)
+                        return JsonSerializer.Serialize(t.Frames[fi], TraceJson.Options);
+                }
+                return "{}";
+
+            case CrashPathType.ModuleFile:
+                if (Drive.AsDump is { } dMod && info.ModuleFile != null)
+                {
+                    var m = dMod.Modules.FirstOrDefault(x =>
+                        SanitizeFileName(x.FileName).Equals(info.ModuleFile, StringComparison.OrdinalIgnoreCase));
+                    if (m != null) return JsonSerializer.Serialize(m, TraceJson.Options);
+                }
+                return "{}";
 
             case CrashPathType.StdoutFile:
                 // Placeholder — wake currently doesn't capture stdout separately from events.
@@ -492,4 +662,44 @@ public sealed class CrashDriveProvider : NavigationCmdletProvider, IContentCmdle
 
     private static string LastSegment(CrashPathInfo info)
         => info.Segments.Length > 0 ? info.Segments[^1] : "";
+
+    /// <summary>Filesystem-safe version of a module filename for path segment use.</summary>
+    private static string SanitizeFileName(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return "unknown";
+        var safe = new System.Text.StringBuilder(name.Length);
+        foreach (var ch in name)
+        {
+            if (char.IsLetterOrDigit(ch) || ch is '_' or '-' or '.') safe.Append(ch);
+            else safe.Append('_');
+        }
+        return safe.ToString();
+    }
+
+    private static string RenderThreadStack(CrashDrive.Dump.DumpStore dump, int managedThreadId)
+    {
+        var t = dump.Threads.FirstOrDefault(x => x.ManagedThreadId == managedThreadId);
+        if (t == null) return "";
+        var lines = new List<string>
+        {
+            $"Thread #{t.ManagedThreadId} (OS thread {t.OSThreadId})",
+            $"  GCMode={t.GCMode}, IsAlive={t.IsAlive}, IsFinalizer={t.IsFinalizer}",
+        };
+        if (t.CurrentException != null)
+        {
+            lines.Add("");
+            lines.Add($"Current exception: {t.CurrentException.TypeName}");
+            lines.Add($"  Message: {t.CurrentException.Message}");
+            lines.Add($"  HResult: 0x{t.CurrentException.HResult:X8}");
+        }
+        lines.Add("");
+        lines.Add($"Stack ({t.Frames.Count} frames):");
+        for (int i = 0; i < t.Frames.Count; i++)
+        {
+            var f = t.Frames[i];
+            lines.Add($"  [{i,3}] {f.Kind,-10} 0x{f.InstructionPointer:X16}  {f.Method ?? "<native>"}");
+            if (!string.IsNullOrEmpty(f.Module)) lines.Add($"          module: {f.Module}");
+        }
+        return string.Join("\n", lines);
+    }
 }

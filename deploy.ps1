@@ -30,6 +30,14 @@ Copy-Item (Join-Path $moduleSource 'CrashDrive.Format.ps1xml') $ModulePath
 
 $buildOutput = Join-Path $projectDir "src\CrashDrive\bin\$Configuration\net8.0"
 Copy-Item (Join-Path $buildOutput 'CrashDrive.dll') $ModulePath
+# Dependencies not in the PowerShell host: copy them alongside the module DLL.
+@(
+    'Microsoft.Diagnostics.Runtime.dll',
+    'Microsoft.Diagnostics.NETCore.Client.dll'
+) | ForEach-Object {
+    $src = Join-Path $buildOutput $_
+    if (Test-Path $src) { Copy-Item $src $ModulePath }
+}
 
 Write-Host "Deployed to $ModulePath" -ForegroundColor Green
 Get-ChildItem $ModulePath | Format-Table Name, Length -AutoSize
