@@ -286,6 +286,33 @@
     </View>
 
     <View>
+      <Name>HeapTypeItem</Name>
+      <ViewSelectedBy>
+        <TypeName>CrashDrive.Models.HeapTypeItem</TypeName>
+      </ViewSelectedBy>
+      <GroupBy>
+        <PropertyName>Directory</PropertyName>
+      </GroupBy>
+      <TableControl>
+        <AutoSize/>
+        <TableHeaders>
+          <TableColumnHeader><Label>Count</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Bytes</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Type</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>InstanceCount</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>TotalBytes</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>TypeName</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <View>
       <Name>ModuleItem</Name>
       <ViewSelectedBy>
         <TypeName>CrashDrive.Models.ModuleItem</TypeName>

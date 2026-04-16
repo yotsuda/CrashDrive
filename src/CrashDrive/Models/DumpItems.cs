@@ -26,6 +26,17 @@ public class FrameItem
     public string Directory { get; set; } = "";
 }
 
+/// <summary>Aggregate stats for one type on the GC heap.</summary>
+public class HeapTypeItem
+{
+    public string Name { get; set; } = "";
+    public string TypeName { get; set; } = "";
+    public int InstanceCount { get; set; }
+    public long TotalBytes { get; set; }
+    public string Path { get; set; } = "";
+    public string Directory { get; set; } = "";
+}
+
 /// <summary>A loaded module in the dumped process.</summary>
 public class ModuleItem
 {

@@ -233,8 +233,25 @@ public sealed class DumpProvider : ProviderBase
                 }
                 break;
 
+            case PathKind.HeapTypeFile when info.TypeName != null:
+                var stats = Store.HeapTypes.FirstOrDefault(s =>
+                    SanitizeFull(s.TypeName).Equals(info.TypeName, StringComparison.Ordinal));
+                if (stats != null)
+                {
+                    WriteItemObject(new Models.HeapTypeItem
+                    {
+                        Name = name,
+                        TypeName = stats.TypeName,
+                        InstanceCount = stats.InstanceCount,
+                        TotalBytes = stats.TotalBytes,
+                        Path = EnsureDrivePrefix(path),
+                        Directory = dir,
+                    }, path, isContainer: false);
+                }
+                break;
+
             case PathKind.Summary or PathKind.ThreadInfo or PathKind.ThreadStack
-                or PathKind.ThreadException or PathKind.HeapTypeFile:
+                or PathKind.ThreadException:
                 WriteFile(name, path, dir);
                 break;
 
@@ -352,8 +369,17 @@ public sealed class DumpProvider : ProviderBase
                 foreach (var t in Store.HeapTypes)
                 {
                     if (Stopping) return;
-                    var tPath = MakePath(path, $"{SanitizeFull(t.TypeName)}.json");
-                    WriteFile($"{SanitizeFull(t.TypeName)}.json", tPath, dir);
+                    var tName = $"{SanitizeFull(t.TypeName)}.json";
+                    var tPath = MakePath(path, tName);
+                    WriteItemObject(new HeapTypeItem
+                    {
+                        Name = tName,
+                        TypeName = t.TypeName,
+                        InstanceCount = t.InstanceCount,
+                        TotalBytes = t.TotalBytes,
+                        Path = EnsureDrivePrefix(tPath),
+                        Directory = dir,
+                    }, tPath, isContainer: false);
                 }
                 break;
             case PathKind.ThreadsFolder:
