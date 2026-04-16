@@ -88,12 +88,15 @@ public sealed class DbgEngSession : IDisposable
             HResult.ThrowOnFailure(openHr, $"OpenDumpFileWide({path})");
         }
 
-        // Apply symbol path if explicit. Without one, keep dbgeng's default —
-        // adding a sympath with a remote (msdl) component at session init makes
-        // WaitForEvent and module-list bootstrap trigger network lookups, which
-        // can block for minutes on a 150-module dump on the first run.
-        if (!string.IsNullOrEmpty(symbolPath))
-            control.Execute(DebugOutctl.ThisClient, $".sympath {symbolPath}", DebugExecute.NotLogged);
+        // Apply symbol path. If the caller didn't pass one, default to the
+        // local WinDbg cache *only* (no msdl) — previously-downloaded PDBs
+        // still resolve, but WaitForEvent / module bootstrap won't hit the
+        // network and hang for minutes. Users opt into a remote lookup by
+        // passing -SymbolPath with a srv*cache*remote component.
+        var effectivePath = !string.IsNullOrEmpty(symbolPath)
+            ? symbolPath
+            : $"srv*{Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dbg", "sym")}";
+        control.Execute(DebugOutctl.ThisClient, $".sympath {effectivePath}", DebugExecute.NotLogged);
 
         // Wait for the engine to process the file and surface the initial event.
         HResult.ThrowOnFailure(
