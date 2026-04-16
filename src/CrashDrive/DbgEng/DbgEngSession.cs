@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 
 namespace CrashDrive.DbgEng;
 
@@ -128,6 +129,33 @@ public sealed class DbgEngSession : IDisposable
     public string Dx(string expression, int recursion = 0)
     {
         return Execute($"dx -r{recursion} {expression}");
+    }
+
+    private bool _linesEnabled;
+    private static readonly Regex s_lnSourceRegex = new(@"\[(?<file>[^\]]+) @ (?<line>\d+)\]",
+        RegexOptions.Compiled);
+
+    /// <summary>Look up the source file + line for an instruction pointer.
+    /// Returns null if the PDB is unavailable or has no source info (public
+    /// Microsoft PDBs typically lack it; source-indexed or private PDBs have
+    /// it). Uses <c>ln &lt;addr&gt;</c> with line display enabled; the output
+    /// includes <c>[file @ line]</c> when resolvable.</summary>
+    public (string File, int Line)? GetSourceLocation(ulong ip)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (ip == 0) return null;
+        if (!_linesEnabled)
+        {
+            try { Execute(".lines -e"); } catch { }
+            _linesEnabled = true;
+        }
+        string output;
+        try { output = Execute($"ln 0x{ip:X}"); }
+        catch { return null; }
+        var m = s_lnSourceRegex.Match(output);
+        if (!m.Success) return null;
+        if (!int.TryParse(m.Groups["line"].Value, out var line)) return null;
+        return (m.Groups["file"].Value.Trim(), line);
     }
 
     public void Dispose()

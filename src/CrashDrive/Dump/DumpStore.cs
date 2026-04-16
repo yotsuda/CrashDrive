@@ -150,6 +150,32 @@ public sealed class DumpStore : IStore
         return lease.Session.Execute(command);
     }
 
+    // ─── Source location lookup ──────────────────────────────────────
+    //
+    // Resolving (ip → file, line) is a per-frame operation that editor-follow
+    // relies on. Cache by IP since frames from different threads often share
+    // the same IP (e.g. many threads parked in NtWaitForSingleObject). Dump
+    // state is immutable so the cache is valid across session swaps.
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<ulong, SourceLocation?>
+        _sourceCache = new();
+
+    public SourceLocation? GetSourceLocation(ulong ip)
+    {
+        if (ip == 0) return null;
+        if (_sourceCache.TryGetValue(ip, out var cached)) return cached;
+        SourceLocation? result = null;
+        try
+        {
+            using var lease = DbgEngSessionManager.AcquireFor(FilePath, _symbolPath);
+            var hit = lease.Session.GetSourceLocation(ip);
+            if (hit is { } v) result = new SourceLocation(v.File, v.Line);
+        }
+        catch { }
+        _sourceCache[ip] = result;
+        return result;
+    }
+
     private string RunAnalyze()
     {
         try
@@ -393,3 +419,5 @@ public sealed class DumpTypeStats
     public int InstanceCount { get; set; }
     public long TotalBytes { get; set; }
 }
+
+public sealed record SourceLocation(string File, int Line);

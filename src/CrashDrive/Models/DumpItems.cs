@@ -22,6 +22,11 @@ public class FrameItem
     public string? Module { get; set; }
     public string Kind { get; set; } = "";
     public string IpHex { get; set; } = "";
+    /// <summary>Source file where the frame's IP resolves, or null if
+    /// unavailable (stripped PDB, public symbols, missing source indexing).
+    /// Consumed by editor-follow.</summary>
+    public string? SourceFile { get; set; }
+    public int? Line { get; set; }
     public string Path { get; set; } = "";
     public string Directory { get; set; } = "";
 }
@@ -81,6 +86,8 @@ public class TtdPositionFrameItem
     public int Index { get; set; }
     public string Name { get; set; } = "";
     public string Frame { get; set; } = "";   // e.g. "ntdll!LdrInitializeThunk"
+    public string? SourceFile { get; set; }
+    public int? Line { get; set; }
     public string Path { get; set; } = "";
     public string Directory { get; set; } = "";
 }

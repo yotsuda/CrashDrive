@@ -206,6 +206,7 @@ public sealed class DumpProvider : ProviderBase
                 if (ft != null && fi >= 0 && fi < ft.Frames.Count)
                 {
                     var f = ft.Frames[fi];
+                    var src = Store.GetSourceLocation(f.InstructionPointer);
                     WriteItemObject(new Models.FrameItem
                     {
                         Index = fi,
@@ -213,6 +214,8 @@ public sealed class DumpProvider : ProviderBase
                         Module = f.Module,
                         Kind = f.Kind,
                         IpHex = $"0x{f.InstructionPointer:X16}",
+                        SourceFile = src?.File,
+                        Line = src?.Line,
                         Path = EnsureDrivePrefix(path),
                         Directory = dir,
                     }, path, isContainer: false);
@@ -427,6 +430,7 @@ public sealed class DumpProvider : ProviderBase
                         if (Stopping) return;
                         var f = thread.Frames[i];
                         var fPath = MakePath(path, $"{i}.json");
+                        var src = Store.GetSourceLocation(f.InstructionPointer);
                         WriteItemObject(new FrameItem
                         {
                             Index = i,
@@ -434,6 +438,8 @@ public sealed class DumpProvider : ProviderBase
                             Module = f.Module,
                             Kind = f.Kind,
                             IpHex = $"0x{f.InstructionPointer:X16}",
+                            SourceFile = src?.File,
+                            Line = src?.Line,
                             Path = EnsureDrivePrefix(fPath),
                             Directory = dir,
                         }, fPath, isContainer: false);

@@ -303,12 +303,55 @@ public sealed class TtdStore : IStore
             try
             {
                 var text = ExtractScalar(session.Dx($"@$curprocess.Threads[{threadId}].Stack.Frames[{i}]"));
-                result.Add(new TtdFrame { Index = i, Description = text });
+                ulong ip = 0;
+                try
+                {
+                    var ipText = ExtractScalar(session.Dx($"@$curprocess.Threads[{threadId}].Stack.Frames[{i}].Attributes.InstructionOffset"));
+                    ip = ParseUlong(ipText);
+                }
+                catch { }
+                result.Add(new TtdFrame { Index = i, Description = text, InstructionPointer = ip });
             }
             catch { }
         }
         return (IReadOnlyList<TtdFrame>)result;
     });
+
+    // ─── Source location lookup ──────────────────────────────────────
+    //
+    // Same contract as DumpStore.GetSourceLocation — routed through the
+    // shared dbgeng session. TTD recordings are immutable like dumps, so
+    // caching by IP is safe across session swaps.
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<ulong, CrashDrive.Dump.SourceLocation?>
+        _sourceCache = new();
+
+    public CrashDrive.Dump.SourceLocation? GetSourceLocation(ulong ip)
+    {
+        if (ip == 0) return null;
+        if (_sourceCache.TryGetValue(ip, out var cached)) return cached;
+        CrashDrive.Dump.SourceLocation? result = null;
+        try
+        {
+            result = WithSession(session =>
+            {
+                var hit = session.GetSourceLocation(ip);
+                return hit is { } v ? new CrashDrive.Dump.SourceLocation(v.File, v.Line) : null;
+            });
+        }
+        catch { }
+        _sourceCache[ip] = result;
+        return result;
+    }
+
+    private static ulong ParseUlong(string s)
+    {
+        s = s.Trim().Replace("`", "").Replace("_", "");
+        if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            return ulong.Parse(s[2..], System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture);
+        return ulong.TryParse(s, out var v) ? v : 0;
+    }
 
     /// <summary>
     /// Parse the multi-line "dx .Select(t => t.Id)" output, extracting the
@@ -483,6 +526,7 @@ public sealed class TtdFrame
 {
     public int Index { get; set; }
     public string Description { get; set; } = "";
+    public ulong InstructionPointer { get; set; }
 }
 
 public sealed class TtdMemoryAccess

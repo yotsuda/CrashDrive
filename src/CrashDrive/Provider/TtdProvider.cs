@@ -304,9 +304,11 @@ public sealed class TtdProvider : ProviderBase
                 var pf = pframes.FirstOrDefault(x => x.Index == pfi);
                 if (pf != null)
                 {
+                    var psrc = Store.GetSourceLocation(pf.InstructionPointer);
                     WriteItemObject(new Models.TtdPositionFrameItem
                     {
                         Index = pf.Index, Name = name, Frame = pf.Description,
+                        SourceFile = psrc?.File, Line = psrc?.Line,
                         Path = EnsureDrivePrefix(path), Directory = dir,
                     }, path, isContainer: false);
                 }
@@ -665,11 +667,14 @@ public sealed class TtdProvider : ProviderBase
                     {
                         if (Stopping) return;
                         var fPath = MakePath(path, $"{f.Index}.json");
+                        var src = Store.GetSourceLocation(f.InstructionPointer);
                         WriteItemObject(new Models.TtdPositionFrameItem
                         {
                             Index = f.Index,
                             Name = $"{f.Index}.json",
                             Frame = f.Description,
+                            SourceFile = src?.File,
+                            Line = src?.Line,
                             Path = EnsureDrivePrefix(fPath),
                             Directory = dir,
                         }, fPath, isContainer: false);
