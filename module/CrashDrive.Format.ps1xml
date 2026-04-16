@@ -323,16 +323,18 @@
       <TableControl>
         <AutoSize/>
         <TableHeaders>
-          <TableColumnHeader><Label>Name</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Kind</Label></TableColumnHeader>
           <TableColumnHeader><Label>Size</Label><Alignment>Right</Alignment></TableColumnHeader>
           <TableColumnHeader><Label>ImageBase</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Name</Label></TableColumnHeader>
         </TableHeaders>
         <TableRowEntries>
           <TableRowEntry>
             <TableColumnItems>
-              <TableColumnItem><PropertyName>FileName</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>if ($_.IsManaged) { 'mgd' } else { 'native' }</ScriptBlock></TableColumnItem>
               <TableColumnItem><PropertyName>Size</PropertyName></TableColumnItem>
               <TableColumnItem><PropertyName>ImageBaseHex</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>FileName</PropertyName></TableColumnItem>
             </TableColumnItems>
           </TableRowEntry>
         </TableRowEntries>

@@ -45,6 +45,7 @@ public class ModuleItem
     public long Size { get; set; }
     public string ImageBaseHex { get; set; } = "";
     public bool IsDynamic { get; set; }
+    public bool IsManaged { get; set; }
     public string Path { get; set; } = "";
     public string Directory { get; set; } = "";
 }

@@ -163,22 +163,48 @@ public sealed class DumpStore : IStore
 
     private IReadOnlyList<DumpModuleInfo> BuildModules()
     {
-        var runtime = _runtime.Value;
-        if (runtime == null) return [];
+        // Managed modules come from ClrRuntime (rich: assembly name, dynamic flag).
+        // Native modules come from the raw data reader (lm-equivalent — ntdll, the
+        // EXE itself, kernel32, etc.). We union both; managed info takes priority
+        // when the same ImageBase appears in both enumerations.
+        var byBase = new Dictionary<ulong, DumpModuleInfo>();
 
-        return runtime.EnumerateModules()
-            .Select(m => new DumpModuleInfo
+        // Native first: every loaded PE as seen by the OS loader.
+        foreach (var m in _target.DataReader.EnumerateModules())
+        {
+            byBase[m.ImageBase] = new DumpModuleInfo
             {
-                Name = m.Name ?? "<unknown>",
-                AssemblyName = m.AssemblyName,
-                FileName = Path.GetFileName(m.Name ?? ""),
-                Size = (long)m.Size,
+                Name = m.FileName ?? "<unknown>",
+                FileName = Path.GetFileName(m.FileName ?? ""),
+                Size = m.ImageSize,
                 ImageBase = m.ImageBase,
-                IsDynamic = m.IsDynamic,
-                IsPEFile = m.IsPEFile,
-            })
-            .OrderBy(m => m.FileName)
-            .ToList();
+                IsManaged = false,
+                IsPEFile = true,
+            };
+        }
+
+        // Managed: enrich matching entries, add any managed-only (e.g. dynamic assemblies).
+        var runtime = _runtime.Value;
+        if (runtime != null)
+        {
+            foreach (var m in runtime.EnumerateModules())
+            {
+                var entry = new DumpModuleInfo
+                {
+                    Name = m.Name ?? "<unknown>",
+                    AssemblyName = m.AssemblyName,
+                    FileName = Path.GetFileName(m.Name ?? ""),
+                    Size = (long)m.Size,
+                    ImageBase = m.ImageBase,
+                    IsDynamic = m.IsDynamic,
+                    IsPEFile = m.IsPEFile,
+                    IsManaged = true,
+                };
+                byBase[m.ImageBase] = entry;
+            }
+        }
+
+        return byBase.Values.OrderBy(m => m.FileName).ToList();
     }
 
     private DumpSummary BuildSummary()
@@ -194,7 +220,7 @@ public sealed class DumpStore : IStore
             ClrVersion = clr?.Version.ToString(),
             ClrFlavor = clr?.Flavor.ToString(),
             ThreadCount = runtime?.Threads.Length ?? 0,
-            ModuleCount = runtime?.EnumerateModules().Count() ?? 0,
+            ModuleCount = Modules.Count,
         };
     }
 
@@ -252,6 +278,7 @@ public sealed class DumpModuleInfo
     public ulong ImageBase { get; set; }
     public bool IsDynamic { get; set; }
     public bool IsPEFile { get; set; }
+    public bool IsManaged { get; set; }
 }
 
 public sealed class DumpExceptionInfo

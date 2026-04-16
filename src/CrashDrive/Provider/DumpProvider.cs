@@ -227,6 +227,7 @@ public sealed class DumpProvider : ProviderBase
                         Name = m.Name, FileName = m.FileName,
                         Size = m.Size, ImageBaseHex = $"0x{m.ImageBase:X16}",
                         IsDynamic = m.IsDynamic,
+                        IsManaged = m.IsManaged,
                         Path = EnsureDrivePrefix(path),
                         Directory = dir,
                     }, path, isContainer: false);
@@ -445,6 +446,7 @@ public sealed class DumpProvider : ProviderBase
                         Size = m.Size,
                         ImageBaseHex = $"0x{m.ImageBase:X16}",
                         IsDynamic = m.IsDynamic,
+                        IsManaged = m.IsManaged,
                         Path = EnsureDrivePrefix(mPath),
                         Directory = dir,
                     }, mPath, isContainer: false);
