@@ -29,12 +29,15 @@ internal static class DbgEngNative
     /// <c>%ProgramFiles%\WindowsApps\Microsoft.WinDbg_*\amd64\dbgeng.dll</c>.
     /// Returns the directory containing that DLL, or null if not found.
     /// </summary>
-    public static string? LocateWinDbgDbgEngDirectory()
+    public static string? LocateWinDbgDbgEngDirectory(out string diagnostic)
     {
         // Honor explicit override.
         var env = Environment.GetEnvironmentVariable("CRASHDRIVE_DBGENG_DIR");
-        if (!string.IsNullOrEmpty(env) && File.Exists(Path.Combine(env, "dbgeng.dll")))
-            return env;
+        if (!string.IsNullOrEmpty(env))
+        {
+            if (File.Exists(Path.Combine(env, "dbgeng.dll"))) { diagnostic = "env-override"; return env; }
+            diagnostic = $"env-set-but-no-dbgeng-at={env}"; return null;
+        }
 
         var arch = RuntimeInformation.ProcessArchitecture switch
         {
@@ -44,20 +47,18 @@ internal static class DbgEngNative
             _ => "amd64",
         };
 
-        // C:\Program Files\WindowsApps is ACL-protected and can't be enumerated from
-        // most processes; Get-AppxPackage via a PowerShell subprocess is the reliable
-        // way to discover the install location.
         var installLocation = QueryAppxInstallLocation("Microsoft.WinDbg");
-        if (installLocation == null) return null;
+        if (installLocation == null) { diagnostic = "appx-query-returned-null"; return null; }
 
         var candidate = Path.Combine(installLocation, arch);
-        if (File.Exists(Path.Combine(candidate, "dbgeng.dll"))
-            && File.Exists(Path.Combine(candidate, "ttd", "TTDReplay.dll")))
-        {
-            return candidate;
-        }
+        var dbgengThere = File.Exists(Path.Combine(candidate, "dbgeng.dll"));
+        var ttdThere = File.Exists(Path.Combine(candidate, "ttd", "TTDReplay.dll"));
+        if (dbgengThere && ttdThere) { diagnostic = $"found={candidate}"; return candidate; }
+        diagnostic = $"path-check-failed: candidate={candidate} dbgeng.dll={dbgengThere} ttd/TTDReplay.dll={ttdThere}";
         return null;
     }
+
+    public static string? LocateWinDbgDbgEngDirectory() => LocateWinDbgDbgEngDirectory(out _);
 
     private static string? QueryAppxInstallLocation(string packageNameContains)
     {
@@ -98,24 +99,77 @@ internal static class DbgEngNative
     /// Pre-load a TTD-capable dbgeng.dll so subsequent [DllImport("dbgeng.dll")]
     /// resolves to it. Idempotent.
     /// </summary>
-    public static bool TryLoadWinDbgDbgEng()
+    public static bool TryLoadWinDbgDbgEng(out string diagnostic)
     {
-        if (s_dbgEngLoaded) return true;
+        diagnostic = "";
+        if (s_dbgEngLoaded) { diagnostic = "already-loaded"; return true; }
         lock (s_loadLock)
         {
-            if (s_dbgEngLoaded) return true;
-            var dir = LocateWinDbgDbgEngDirectory();
+            if (s_dbgEngLoaded) { diagnostic = "already-loaded"; return true; }
+            var dir = LocateWinDbgDbgEngDirectory(out var locDiag);
+            diagnostic = $"locate={locDiag}";
             if (dir == null) return false;
 
-            // Ensure the loader finds sibling DLLs (dbgcore, dbghelp, ttd\TTDReplay, etc.)
-            SetDllDirectory(dir);
+            // WindowsApps ACL blocks LoadLibraryExW even though File.Exists succeeds
+            // (LoadLibrary returns ERROR_ACCESS_DENIED = 5). Mirror the DLL tree to
+            // a process-private staging dir and load from there.
+            var stagingDir = MirrorForLoad(dir, out var mirrorDiag);
+            diagnostic += $"; mirror={mirrorDiag}";
+            if (stagingDir == null) return false;
 
-            var dbgengPath = Path.Combine(dir, "dbgeng.dll");
+            SetDllDirectory(stagingDir);
+
+            var dbgengPath = Path.Combine(stagingDir, "dbgeng.dll");
             var h = LoadLibraryExW(dbgengPath, IntPtr.Zero, LOAD_WITH_ALTERED_SEARCH_PATH);
-            if (h == IntPtr.Zero) return false;
+            if (h == IntPtr.Zero)
+            {
+                diagnostic += $"; LoadLibrary failed (error {Marshal.GetLastWin32Error()})";
+                return false;
+            }
 
             s_dbgEngLoaded = true;
+            diagnostic += "; loaded";
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Copy the WinDbg dbgeng DLL set to a writable staging directory so that
+    /// LoadLibraryExW can actually map them (WindowsApps denies direct mapping).
+    /// Idempotent — reuses the staging directory if already populated.
+    /// </summary>
+    private static string? MirrorForLoad(string sourceDir, out string diagnostic)
+    {
+        try
+        {
+            var staging = Path.Combine(Path.GetTempPath(), "CrashDrive.dbgeng");
+            Directory.CreateDirectory(staging);
+            int count = 0;
+            MirrorTree(sourceDir, staging, ref count);
+            diagnostic = $"staged={staging} ({count} files)";
+            return staging;
+        }
+        catch (Exception ex)
+        {
+            diagnostic = $"staging-failed: {ex.GetType().Name}: {ex.Message}";
+            return null;
+        }
+    }
+
+    private static void MirrorTree(string srcDir, string dstDir, ref int count)
+    {
+        Directory.CreateDirectory(dstDir);
+        foreach (var file in Directory.EnumerateFiles(srcDir))
+        {
+            var name = Path.GetFileName(file);
+            var dst = Path.Combine(dstDir, name);
+            if (File.Exists(dst) && new FileInfo(dst).Length == new FileInfo(file).Length) continue;
+            try { File.Copy(file, dst, overwrite: true); count++; } catch { /* locked files */ }
+        }
+        foreach (var sub in Directory.EnumerateDirectories(srcDir))
+        {
+            var subName = Path.GetFileName(sub);
+            MirrorTree(sub, Path.Combine(dstDir, subName), ref count);
         }
     }
 }

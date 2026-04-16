@@ -42,10 +42,10 @@ public sealed class DbgEngSession : IDisposable
         var isTtd = path.EndsWith(".run", StringComparison.OrdinalIgnoreCase);
         if (isTtd)
         {
-            if (!DbgEngNative.TryLoadWinDbgDbgEng())
+            if (!DbgEngNative.TryLoadWinDbgDbgEng(out var loadDiag))
                 throw new InvalidOperationException(
                     "Opening .run (TTD) files requires WinDbg Preview (install via 'winget install Microsoft.WinDbg'). " +
-                    "Set CRASHDRIVE_DBGENG_DIR to override detection.");
+                    "Set CRASHDRIVE_DBGENG_DIR to override detection. Details: " + loadDiag);
         }
 
         // Create the client as IDebugClient5 directly.
