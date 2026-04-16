@@ -10,17 +10,24 @@ namespace CrashDrive.Ttd;
 /// </summary>
 public sealed class TtdStore : IStore
 {
-    private readonly Lazy<DbgEngSession> _session;
     private readonly Lazy<IReadOnlyList<TtdEvent>> _events;
     private readonly Lazy<TtdSummary> _summary;
     private readonly string? _symbolPath;
+
+    // Tracks which manager generation we have state tied to. -1 means never
+    // acquired. When the generation changes we know the live session was
+    // swapped out and back: cached position is gone, TTDAnalyze isn't loaded
+    // on the new session. See DbgEngSessionManager for the swap rationale.
+    private long _dbgGeneration = -1;
+    private bool _ttdAnalyzeLoaded;
+    private bool _everLoaded;
 
     public string FilePath { get; }
     public long FileSizeBytes { get; }
     public DateTime LastWriteTime { get; }
     public StoreKind Kind => StoreKind.Ttd;
 
-    public bool IsLoaded => _session.IsValueCreated;
+    public bool IsLoaded => _everLoaded;
 
     public TtdStore(string path, string? symbolPath = null)
     {
@@ -33,23 +40,34 @@ public sealed class TtdStore : IStore
         FileSizeBytes = info.Length;
         LastWriteTime = info.LastWriteTimeUtc;
 
-        _session = new Lazy<DbgEngSession>(() => DbgEngSession.Open(path, symbolPath),
-            LazyThreadSafetyMode.ExecutionAndPublication);
         _events = new Lazy<IReadOnlyList<TtdEvent>>(LoadEvents,
             LazyThreadSafetyMode.ExecutionAndPublication);
         _summary = new Lazy<TtdSummary>(LoadSummary,
             LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
-    public DbgEngSession Session
+    /// <summary>Acquire the shared dbgeng session for the duration of
+    /// <paramref name="body"/>. Before calling the body, invalidates
+    /// per-generation state (seek position) and re-loads TTDAnalyze if the
+    /// session was swapped since we last ran. The manager's monitor is
+    /// reentrant, so <paramref name="body"/> may itself call public methods
+    /// that acquire again without deadlocking.</summary>
+    private T WithSession<T>(Func<DbgEngSession, T> body)
     {
-        get
+        using var lease = DbgEngSessionManager.AcquireFor(FilePath, _symbolPath);
+        if (_dbgGeneration != lease.Generation)
         {
-            var s = _session.Value;
-            // TTD Data Model extension must be loaded before Events/Lifetime bind.
-            EnsureTtdAnalyzeLoaded(s);
-            return s;
+            _dbgGeneration = lease.Generation;
+            _currentPosition = null;
+            _ttdAnalyzeLoaded = false;
         }
+        if (!_ttdAnalyzeLoaded)
+        {
+            try { lease.Session.Execute(".load ttd\\TTDAnalyze"); } catch { }
+            _ttdAnalyzeLoaded = true;
+        }
+        _everLoaded = true;
+        return body(lease.Session);
     }
 
     public IReadOnlyList<TtdEvent> Events => _events.Value;
@@ -59,19 +77,22 @@ public sealed class TtdStore : IStore
     //
     // DbgEng maintains a single "current position" per session. Cache it so
     // we only issue !tt when moving. Callers pass native "major:minor" strings.
+    // Invalidated automatically by WithSession on generation change.
 
-    private readonly object _posLock = new();
     private string? _currentPosition;
 
     /// <summary>Navigate to a specific TTD position (native "major:minor" string).</summary>
-    public void SeekTo(string position)
+    public void SeekTo(string position) => WithSession(session =>
     {
-        lock (_posLock)
-        {
-            if (_currentPosition == position) return;
-            Session.Execute($"!tt {position}");
-            _currentPosition = position;
-        }
+        SeekToUnderLease(session, position);
+        return 0;
+    });
+
+    private void SeekToUnderLease(DbgEngSession session, string position)
+    {
+        if (_currentPosition == position) return;
+        session.Execute($"!tt {position}");
+        _currentPosition = position;
     }
 
     /// <summary>Run an arbitrary dbgeng command, optionally after seeking to a
@@ -79,8 +100,7 @@ public sealed class TtdStore : IStore
     /// from cmdlets (db/u/x/dx/!dumpobj etc.). Position may be "start"/"end"
     /// aliases or a native major:minor string.</summary>
     public string ExecuteDbgCommand(string command, string? position = null, string? threadId = null)
-    {
-        lock (_posLock)
+        => WithSession(session =>
         {
             if (position != null)
             {
@@ -90,67 +110,63 @@ public sealed class TtdStore : IStore
                     "end" => Summary.LifetimeEnd,
                     _ => position,
                 };
-                SeekTo(native);
+                SeekToUnderLease(session, native);
             }
             if (threadId != null)
             {
                 var tid = threadId.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
                     ? threadId[2..] : threadId;
-                return Session.Execute($"~~[0x{tid}]s;{command}");
+                return session.Execute($"~~[0x{tid}]s;{command}");
             }
-            return Session.Execute(command);
-        }
-    }
+            return session.Execute(command);
+        });
 
     /// <summary>Dump register state for the given thread at the given TTD position.
     /// Seeks to the position, switches to the thread, and runs `r`.</summary>
-    public string RenderRegistersAtPosition(string position, string threadId)
+    public string RenderRegistersAtPosition(string position, string threadId) => WithSession(session =>
     {
-        lock (_posLock)
+        try
         {
-            try
-            {
-                SeekTo(position);
-                // TTD thread ids are hex like "0xa098"; dbgeng's ~~[ID]s selector
-                // takes a hex OS thread id. Strip the 0x prefix.
-                var tid = threadId.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
-                    ? threadId[2..] : threadId;
-                return Session.Execute($"~~[0x{tid}]s;r");
-            }
-            catch (Exception ex)
-            {
-                return $"Failed to read registers at position {position} for thread {threadId}: " +
-                    $"{ex.GetType().Name}: {ex.Message}\n";
-            }
+            SeekToUnderLease(session, position);
+            // TTD thread ids are hex like "0xa098"; dbgeng's ~~[ID]s selector
+            // takes a hex OS thread id. Strip the 0x prefix.
+            var tid = threadId.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                ? threadId[2..] : threadId;
+            return session.Execute($"~~[0x{tid}]s;r");
         }
-    }
+        catch (Exception ex)
+        {
+            return $"Failed to read registers at position {position} for thread {threadId}: " +
+                $"{ex.GetType().Name}: {ex.Message}\n";
+        }
+    });
 
     /// <summary>
     /// Return threads visible at the current (last-seeked) position.
     /// Note: the Threads data-model collection is keyed by thread ID, not a
     /// numeric index. We enumerate via .Select() and then fetch details per ID.
     /// </summary>
-    public IReadOnlyList<TtdThreadAtPosition> GetThreadsAtCurrentPosition()
+    public IReadOnlyList<TtdThreadAtPosition> GetThreadsAtCurrentPosition() => WithSession(session =>
     {
-        var ids = ParseIdList(Session.Dx("@$curprocess.Threads.Select(t => t.Id)", recursion: 1));
+        var ids = ParseIdList(session.Dx("@$curprocess.Threads.Select(t => t.Id)", recursion: 1));
 
         var result = new List<TtdThreadAtPosition>();
         foreach (var id in ids)
         {
             int frameCount = 0;
-            try { frameCount = ParseInt(ExtractScalar(Session.Dx($"@$curprocess.Threads[{id}].Stack.Frames.Count()"))); }
+            try { frameCount = ParseInt(ExtractScalar(session.Dx($"@$curprocess.Threads[{id}].Stack.Frames.Count()"))); }
             catch { }
             result.Add(new TtdThreadAtPosition { Id = id, FrameCount = frameCount });
         }
-        return result;
-    }
+        return (IReadOnlyList<TtdThreadAtPosition>)result;
+    });
 
     /// <summary>
     /// Query memory access history in an address range.
     /// <paramref name="mode"/> is "r", "w", or "rw".
     /// </summary>
     public IReadOnlyList<TtdMemoryAccess> GetMemoryAccesses(
-        string startAddrHex, string endAddrHex, string mode, int maxRecords = 200)
+        string startAddrHex, string endAddrHex, string mode, int maxRecords = 200) => WithSession(session =>
     {
         var result = new List<TtdMemoryAccess>();
         var baseExpr = $"@$cursession.TTD.Memory({startAddrHex}, {endAddrHex}, \"{mode}\")";
@@ -162,8 +178,8 @@ public sealed class TtdStore : IStore
                    "A = m.Address, S = m.Size, V = m.Value, O = m.OverwrittenValue, I = m.IP })";
 
         string text;
-        try { text = Session.Dx(proj, recursion: 2); }
-        catch { return result; }
+        try { text = session.Dx(proj, recursion: 2); }
+        catch { return (IReadOnlyList<TtdMemoryAccess>)result; }
 
         foreach (var record in ParseProjectedRecords(text))
         {
@@ -180,8 +196,8 @@ public sealed class TtdStore : IStore
                 IP = record.GetValueOrDefault("I", ""),
             });
         }
-        return result;
-    }
+        return (IReadOnlyList<TtdMemoryAccess>)result;
+    });
 
     /// <summary>
     /// Parse "dx -r2 expr.Select(...)" output where each element is a block of
@@ -225,7 +241,7 @@ public sealed class TtdStore : IStore
     /// Each record spans a time range (entry → exit) and carries argument registers
     /// plus the return value.
     /// </summary>
-    public IReadOnlyList<TtdCall> GetCalls(string module, string function, int maxRecords = 500)
+    public IReadOnlyList<TtdCall> GetCalls(string module, string function, int maxRecords = 500) => WithSession(session =>
     {
         var result = new List<TtdCall>();
         var functionFullName = $"{module}!{function}";
@@ -237,8 +253,8 @@ public sealed class TtdStore : IStore
                    "FA = c.FunctionAddress, RA = c.ReturnAddress, RV = c.ReturnValue })";
 
         string text;
-        try { text = Session.Dx(proj, recursion: 2); }
-        catch { return result; }
+        try { text = session.Dx(proj, recursion: 2); }
+        catch { return (IReadOnlyList<TtdCall>)result; }
 
         var idx = 0;
         foreach (var record in ParseProjectedRecords(text))
@@ -258,41 +274,41 @@ public sealed class TtdStore : IStore
             // For folder enumeration we skip — avoids N×M queries.
             result.Add(call);
         }
-        return result;
-    }
+        return (IReadOnlyList<TtdCall>)result;
+    });
 
     /// <summary>Fetch the 4 register parameters for a specific call record.</summary>
-    public IReadOnlyList<string> GetCallParameters(string module, string function, int index)
+    public IReadOnlyList<string> GetCallParameters(string module, string function, int index) => WithSession(session =>
     {
         var functionFullName = $"{module}!{function}";
         try
         {
-            return ParseIdList(Session.Dx(
+            return ParseIdList(session.Dx(
                 $"@$cursession.TTD.Calls(\"{functionFullName}\")[{index}].Parameters.Select(p => p)",
                 recursion: 1));
         }
-        catch { return []; }
-    }
+        catch { return (IReadOnlyList<string>)Array.Empty<string>(); }
+    });
 
     /// <summary>Return stack frames for a thread id at the current position.</summary>
-    public IReadOnlyList<TtdFrame> GetFramesAtCurrentPosition(string threadId)
+    public IReadOnlyList<TtdFrame> GetFramesAtCurrentPosition(string threadId) => WithSession(session =>
     {
         var result = new List<TtdFrame>();
         int frameCount;
-        try { frameCount = ParseInt(ExtractScalar(Session.Dx($"@$curprocess.Threads[{threadId}].Stack.Frames.Count()"))); }
-        catch { return result; }
+        try { frameCount = ParseInt(ExtractScalar(session.Dx($"@$curprocess.Threads[{threadId}].Stack.Frames.Count()"))); }
+        catch { return (IReadOnlyList<TtdFrame>)result; }
 
         for (int i = 0; i < Math.Min(frameCount, 128); i++)
         {
             try
             {
-                var text = ExtractScalar(Session.Dx($"@$curprocess.Threads[{threadId}].Stack.Frames[{i}]"));
+                var text = ExtractScalar(session.Dx($"@$curprocess.Threads[{threadId}].Stack.Frames[{i}]"));
                 result.Add(new TtdFrame { Index = i, Description = text });
             }
             catch { }
         }
-        return result;
-    }
+        return (IReadOnlyList<TtdFrame>)result;
+    });
 
     /// <summary>
     /// Parse the multi-line "dx .Select(t => t.Id)" output, extracting the
@@ -317,26 +333,13 @@ public sealed class TtdStore : IStore
         return ids;
     }
 
-    private static readonly object s_loadLock = new();
-    private static readonly HashSet<DbgEngSession> s_loadedSessions = new();
-
-    private static void EnsureTtdAnalyzeLoaded(DbgEngSession session)
-    {
-        lock (s_loadLock)
-        {
-            if (s_loadedSessions.Contains(session)) return;
-            try { session.Execute(".load ttd\\TTDAnalyze"); } catch { }
-            s_loadedSessions.Add(session);
-        }
-    }
-
-    private IReadOnlyList<TtdEvent> LoadEvents()
+    private IReadOnlyList<TtdEvent> LoadEvents() => WithSession(session =>
     {
         // Get count first, then query each event individually. This avoids the
         // brittle "dx -g" grid-output parsing and works uniformly for any count.
         int count;
-        try { count = ParseInt(ExtractScalar(Session.Dx("@$curprocess.TTD.Events.Count()"))); }
-        catch { return []; }
+        try { count = ParseInt(ExtractScalar(session.Dx("@$curprocess.TTD.Events.Count()"))); }
+        catch { return (IReadOnlyList<TtdEvent>)Array.Empty<TtdEvent>(); }
 
         var list = new List<TtdEvent>(count);
         for (int i = 0; i < count; i++)
@@ -344,38 +347,35 @@ public sealed class TtdStore : IStore
             var ev = new TtdEvent();
             try
             {
-                ev.Position = ExtractScalar(Session.Dx($"@$curprocess.TTD.Events[{i}].Position"));
-                ev.Type = ExtractScalar(Session.Dx($"@$curprocess.TTD.Events[{i}].Type"));
+                ev.Position = ExtractScalar(session.Dx($"@$curprocess.TTD.Events[{i}].Position"));
+                ev.Type = ExtractScalar(session.Dx($"@$curprocess.TTD.Events[{i}].Type"));
                 // Module field may not exist on all event types — tolerate failure.
-                try { ev.Module = ExtractScalar(Session.Dx($"@$curprocess.TTD.Events[{i}].Module")); } catch { }
+                try { ev.Module = ExtractScalar(session.Dx($"@$curprocess.TTD.Events[{i}].Module")); } catch { }
             }
             catch { /* skip malformed event */ }
             list.Add(ev);
         }
-        return list;
-    }
+        return (IReadOnlyList<TtdEvent>)list;
+    });
 
-    private TtdSummary LoadSummary()
+    private TtdSummary LoadSummary() => WithSession(session =>
     {
         var summary = new TtdSummary
         {
             FilePath = FilePath,
             FileSizeBytes = FileSizeBytes,
         };
-        try { summary.LifetimeStart = ExtractScalar(Session.Dx("@$curprocess.TTD.Lifetime.MinPosition")); } catch { }
-        try { summary.LifetimeEnd = ExtractScalar(Session.Dx("@$curprocess.TTD.Lifetime.MaxPosition")); } catch { }
-        try { summary.ThreadCount = ParseInt(ExtractScalar(Session.Dx("@$curprocess.Threads.Count()"))); } catch { }
-        try { summary.ModuleCount = ParseInt(ExtractScalar(Session.Dx("@$curprocess.Modules.Count()"))); } catch { }
-        try { summary.EventCount = ParseInt(ExtractScalar(Session.Dx("@$curprocess.TTD.Events.Count()"))); } catch { }
+        try { summary.LifetimeStart = ExtractScalar(session.Dx("@$curprocess.TTD.Lifetime.MinPosition")); } catch { }
+        try { summary.LifetimeEnd = ExtractScalar(session.Dx("@$curprocess.TTD.Lifetime.MaxPosition")); } catch { }
+        try { summary.ThreadCount = ParseInt(ExtractScalar(session.Dx("@$curprocess.Threads.Count()"))); } catch { }
+        try { summary.ModuleCount = ParseInt(ExtractScalar(session.Dx("@$curprocess.Modules.Count()"))); } catch { }
+        try { summary.EventCount = ParseInt(ExtractScalar(session.Dx("@$curprocess.TTD.Events.Count()"))); } catch { }
         return summary;
-    }
+    });
 
     public void Dispose()
     {
-        if (_session.IsValueCreated)
-        {
-            try { _session.Value.Dispose(); } catch { }
-        }
+        DbgEngSessionManager.CloseIf(FilePath);
     }
 
     // ─── dx output parsing helpers ─────────────────────────────────

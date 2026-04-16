@@ -92,9 +92,9 @@ public sealed class DumpStore : IStore
     // ─── !analyze -v (via dbgeng) ────────────────────────────────────
     //
     // Microsoft's crash-triage heuristics live in ext.dll / !analyze, which is
-    // effectively unreplayable from scratch. Opening a second dbgeng session
-    // against the same dump and running the command there is the pragmatic
-    // way to surface its output. Lazy — most users never ask for it.
+    // effectively unreplayable from scratch. We route through the shared
+    // DbgEngSessionManager (see that class for the process-singleton rationale)
+    // and cache the output — most users never ask for it.
 
     private readonly Lazy<string> _analyzeOutput;
 
@@ -103,12 +103,12 @@ public sealed class DumpStore : IStore
 
     // ─── Per-thread register state (via dbgeng) ──────────────────────
     //
-    // ClrMD doesn't expose register context. We open a secondary dbgeng session
-    // and run '~<osid>s; r' on demand. Lazy + cached per thread so repeated
-    // reads of the same registers.txt don't reopen the session.
+    // ClrMD doesn't expose register context. We run '~<osid>s; r' on the
+    // shared dbgeng session and cache per-thread output. The cache is valid
+    // across session swaps: the dump file is immutable, so repeated reopens
+    // produce identical register state.
 
-    private readonly object _regLock = new();
-    private DbgEngSession? _regSession;
+    private readonly object _regCacheLock = new();
     private readonly Dictionary<uint, string> _regCache = new();
 
     /// <summary>Return a multi-line register dump for the thread identified by
@@ -123,23 +123,22 @@ public sealed class DumpStore : IStore
 
     private string RenderRegistersByOsId(uint osThreadId)
     {
-        lock (_regLock)
-        {
+        lock (_regCacheLock)
             if (_regCache.TryGetValue(osThreadId, out var cached)) return cached;
-            try
-            {
-                _regSession ??= DbgEngSession.Open(FilePath, _symbolPath);
-                // `~~[<hex>]s` switches current thread by OS id; `r` dumps
-                // the general-purpose register file for the target arch.
-                var output = _regSession.Execute($"~~[0x{osThreadId:X}]s;r");
-                _regCache[osThreadId] = output;
-                return output;
-            }
-            catch (Exception ex)
-            {
-                return $"Failed to read registers for OS thread 0x{osThreadId:X}: " +
-                    $"{ex.GetType().Name}: {ex.Message}\n";
-            }
+
+        try
+        {
+            using var lease = DbgEngSessionManager.AcquireFor(FilePath, _symbolPath);
+            // `~~[<hex>]s` switches current thread by OS id; `r` dumps
+            // the general-purpose register file for the target arch.
+            var output = lease.Session.Execute($"~~[0x{osThreadId:X}]s;r");
+            lock (_regCacheLock) _regCache[osThreadId] = output;
+            return output;
+        }
+        catch (Exception ex)
+        {
+            return $"Failed to read registers for OS thread 0x{osThreadId:X}: " +
+                $"{ex.GetType().Name}: {ex.Message}\n";
         }
     }
 
@@ -147,23 +146,20 @@ public sealed class DumpStore : IStore
     /// Intended for cmdlets that need raw debugger access (memory reads, u/x/dt, etc.).</summary>
     public string ExecuteDbgCommand(string command)
     {
-        lock (_regLock)
-        {
-            _regSession ??= DbgEngSession.Open(FilePath, _symbolPath);
-            return _regSession.Execute(command);
-        }
+        using var lease = DbgEngSessionManager.AcquireFor(FilePath, _symbolPath);
+        return lease.Session.Execute(command);
     }
 
     private string RunAnalyze()
     {
         try
         {
-            using var session = DbgEngSession.Open(FilePath, _symbolPath);
+            using var lease = DbgEngSessionManager.AcquireFor(FilePath, _symbolPath);
             // Short-circuit on non-crash snapshots: .exr -1 dumps the last exception
             // record, or prints "ExceptionAddress: 0000000000000000" / similar when
             // none exists. !analyze -v on a snapshot still runs (slowly) but has no
             // useful output — prefer explicit messaging to a 10-minute symbol walk.
-            var exr = session.Execute(".exr -1");
+            var exr = lease.Session.Execute(".exr -1");
             if (string.IsNullOrWhiteSpace(exr)
                 || exr.Contains("ExceptionAddress: 0000000000000000", StringComparison.OrdinalIgnoreCase)
                 || exr.Contains("No exception record", StringComparison.OrdinalIgnoreCase)
@@ -175,7 +171,7 @@ public sealed class DumpStore : IStore
                     "dump from an actual crash.\n\n" +
                     "--- .exr -1 output ---\n" + exr;
             }
-            return session.Execute("!analyze -v");
+            return lease.Session.Execute("!analyze -v");
         }
         catch (Exception ex)
         {
@@ -331,12 +327,9 @@ public sealed class DumpStore : IStore
         {
             try { _runtime.Value?.Dispose(); } catch { }
         }
-        lock (_regLock)
-        {
-            try { _regSession?.Dispose(); } catch { }
-            _regSession = null;
-        }
+        lock (_regCacheLock) _regCache.Clear();
         _target.Dispose();
+        DbgEngSessionManager.CloseIf(FilePath);
     }
 }
 
