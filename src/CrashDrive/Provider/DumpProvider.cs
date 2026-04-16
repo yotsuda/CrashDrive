@@ -248,12 +248,24 @@ public sealed class DumpProvider : ProviderBase
 
     protected override void GetChildItems(string path, bool recurse)
     {
-        var info = Parse(NormalizePath(path));
-        try { WriteChildren(info, path); }
+        try { WriteChildrenRecursive(path, recurse); }
         catch (Exception ex) when (ex is not OperationCanceledException
                                    and not PipelineStoppedException)
         {
             WriteError(new ErrorRecord(ex, "DumpGetChildError", ErrorCategory.NotSpecified, path));
+        }
+    }
+
+    private void WriteChildrenRecursive(string path, bool recurse)
+    {
+        var info = Parse(NormalizePath(path));
+        WriteChildren(info, path);
+        if (!recurse) return;
+        foreach (var (name, isContainer) in Enumerate(info))
+        {
+            if (Stopping) return;
+            if (!isContainer) continue;
+            WriteChildrenRecursive(MakePath(path, name), recurse: true);
         }
     }
 

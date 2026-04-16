@@ -190,12 +190,24 @@ public sealed class TraceProvider : ProviderBase
 
     protected override void GetChildItems(string path, bool recurse)
     {
-        var info = Parse(NormalizePath(path));
-        try { WriteChildren(info, path); }
+        try { WriteChildrenRecursive(path, recurse); }
         catch (Exception ex) when (ex is not OperationCanceledException
                                    and not PipelineStoppedException)
         {
             WriteError(new ErrorRecord(ex, "TraceGetChildError", ErrorCategory.NotSpecified, path));
+        }
+    }
+
+    private void WriteChildrenRecursive(string path, bool recurse)
+    {
+        var info = Parse(NormalizePath(path));
+        WriteChildren(info, path);
+        if (!recurse) return;
+        foreach (var (name, isContainer) in Enumerate(info))
+        {
+            if (Stopping) return;
+            if (!isContainer) continue;
+            WriteChildrenRecursive(MakePath(path, name), recurse: true);
         }
     }
 
@@ -387,7 +399,9 @@ public sealed class TraceProvider : ProviderBase
         foreach (var c in rec.Context)
         {
             var marker = c.Seq == rec.Event.Seq ? ">>>" : "   ";
-            lines.Add($"{marker} [#{c.Seq,4} d={c.Depth} L{c.Line}] {c.Type,-10} {c.Function}");
+            var depth = c.Depth?.ToString() ?? "-";
+            var line = c.Line?.ToString() ?? "-";
+            lines.Add($"{marker} [#{c.Seq,4} d={depth} L{line}] {c.Type,-10} {c.Function}");
         }
         return string.Join("\n", lines);
     }
