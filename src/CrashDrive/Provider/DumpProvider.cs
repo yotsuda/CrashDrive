@@ -64,7 +64,7 @@ public sealed class DumpProvider : ProviderBase
     private enum PathKind
     {
         Root, Summary, Analyze,
-        ThreadsFolder, ThreadFolder, ThreadInfo, ThreadStack, ThreadException,
+        ThreadsFolder, ThreadFolder, ThreadInfo, ThreadStack, ThreadException, ThreadRegisters,
         ThreadFramesFolder, FrameFile,
         ModulesFolder, ModuleFile,
         HeapFolder, HeapTypesFolder, HeapTypeFile,
@@ -108,6 +108,7 @@ public sealed class DumpProvider : ProviderBase
                 {
                     "info.json" => new(PathKind.ThreadInfo, segs, ThreadId: tid),
                     "stack.txt" => new(PathKind.ThreadStack, segs, ThreadId: tid),
+                    "registers.txt" => new(PathKind.ThreadRegisters, segs, ThreadId: tid),
                     "exception.json" => new(PathKind.ThreadException, segs, ThreadId: tid),
                     "frames" => new(PathKind.ThreadFramesFolder, segs, ThreadId: tid),
                     _ => new(PathKind.Invalid, segs),
@@ -142,7 +143,7 @@ public sealed class DumpProvider : ProviderBase
         {
             PathKind.Invalid => false,
             PathKind.ThreadFolder or PathKind.ThreadInfo or PathKind.ThreadStack
-                or PathKind.ThreadException or PathKind.ThreadFramesFolder
+                or PathKind.ThreadException or PathKind.ThreadRegisters or PathKind.ThreadFramesFolder
                 => info.ThreadId is int tid && Store.Threads.Any(t => t.ManagedThreadId == tid),
             PathKind.FrameFile
                 => info.ThreadId is int tid && info.FrameIndex is int fi
@@ -253,7 +254,7 @@ public sealed class DumpProvider : ProviderBase
                 break;
 
             case PathKind.Summary or PathKind.Analyze or PathKind.ThreadInfo or PathKind.ThreadStack
-                or PathKind.ThreadException:
+                or PathKind.ThreadException or PathKind.ThreadRegisters:
                 WriteFile(name, path, dir);
                 break;
 
@@ -328,6 +329,7 @@ public sealed class DumpProvider : ProviderBase
             case PathKind.ThreadFolder:
                 yield return ("info.json", false);
                 yield return ("stack.txt", false);
+                yield return ("registers.txt", false);
                 if (info.ThreadId is int tidEx
                     && Store.Threads.FirstOrDefault(x => x.ManagedThreadId == tidEx)?.CurrentException != null)
                     yield return ("exception.json", false);
@@ -410,6 +412,7 @@ public sealed class DumpProvider : ProviderBase
             case PathKind.ThreadFolder:
                 WriteFile("info.json", MakePath(path, "info.json"), dir);
                 WriteFile("stack.txt", MakePath(path, "stack.txt"), dir);
+                WriteFile("registers.txt", MakePath(path, "registers.txt"), dir);
                 if (info.ThreadId is int tidExWrite
                     && Store.Threads.FirstOrDefault(x => x.ManagedThreadId == tidExWrite)?.CurrentException != null)
                     WriteFile("exception.json", MakePath(path, "exception.json"), dir);
@@ -469,6 +472,7 @@ public sealed class DumpProvider : ProviderBase
                 => Store.Threads.FirstOrDefault(x => x.ManagedThreadId == tid) is { } t
                     ? JsonSerializer.Serialize(t, TraceJson.Options) : "{}",
             PathKind.ThreadStack when info.ThreadId is int tid2 => RenderThreadStack(tid2),
+            PathKind.ThreadRegisters when info.ThreadId is int tidR => Store.RenderRegistersForThread(tidR),
             PathKind.FrameFile when info.ThreadId is int tid3 && info.FrameIndex is int fi
                 => Store.Threads.FirstOrDefault(x => x.ManagedThreadId == tid3) is { } t2
                     && fi >= 0 && fi < t2.Frames.Count

@@ -74,6 +74,29 @@ public sealed class TtdStore : IStore
         }
     }
 
+    /// <summary>Dump register state for the given thread at the given TTD position.
+    /// Seeks to the position, switches to the thread, and runs `r`.</summary>
+    public string RenderRegistersAtPosition(string position, string threadId)
+    {
+        lock (_posLock)
+        {
+            try
+            {
+                SeekTo(position);
+                // TTD thread ids are hex like "0xa098"; dbgeng's ~~[ID]s selector
+                // takes a hex OS thread id. Strip the 0x prefix.
+                var tid = threadId.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                    ? threadId[2..] : threadId;
+                return Session.Execute($"~~[0x{tid}]s;r");
+            }
+            catch (Exception ex)
+            {
+                return $"Failed to read registers at position {position} for thread {threadId}: " +
+                    $"{ex.GetType().Name}: {ex.Message}\n";
+            }
+        }
+    }
+
     /// <summary>
     /// Return threads visible at the current (last-seeked) position.
     /// Note: the Threads data-model collection is keyed by thread ID, not a

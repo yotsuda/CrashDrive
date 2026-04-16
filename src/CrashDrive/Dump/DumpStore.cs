@@ -97,6 +97,48 @@ public sealed class DumpStore : IStore
     /// <summary>Run `!analyze -v` via dbgeng and return the captured text. Cached.</summary>
     public string AnalyzeOutput => _analyzeOutput.Value;
 
+    // ─── Per-thread register state (via dbgeng) ──────────────────────
+    //
+    // ClrMD doesn't expose register context. We open a secondary dbgeng session
+    // and run '~<osid>s; r' on demand. Lazy + cached per thread so repeated
+    // reads of the same registers.txt don't reopen the session.
+
+    private readonly object _regLock = new();
+    private DbgEngSession? _regSession;
+    private readonly Dictionary<uint, string> _regCache = new();
+
+    /// <summary>Return a multi-line register dump for the thread identified by
+    /// ClrMD's managed thread id, or an error string if the thread or register
+    /// state can't be located.</summary>
+    public string RenderRegistersForThread(int managedThreadId)
+    {
+        var t = Threads.FirstOrDefault(x => x.ManagedThreadId == managedThreadId);
+        if (t == null) return $"Thread #{managedThreadId} not found.\n";
+        return RenderRegistersByOsId(t.OSThreadId);
+    }
+
+    private string RenderRegistersByOsId(uint osThreadId)
+    {
+        lock (_regLock)
+        {
+            if (_regCache.TryGetValue(osThreadId, out var cached)) return cached;
+            try
+            {
+                _regSession ??= DbgEngSession.Open(FilePath, _symbolPath);
+                // `~~[<hex>]s` switches current thread by OS id; `r` dumps
+                // the general-purpose register file for the target arch.
+                var output = _regSession.Execute($"~~[0x{osThreadId:X}]s;r");
+                _regCache[osThreadId] = output;
+                return output;
+            }
+            catch (Exception ex)
+            {
+                return $"Failed to read registers for OS thread 0x{osThreadId:X}: " +
+                    $"{ex.GetType().Name}: {ex.Message}\n";
+            }
+        }
+    }
+
     private string RunAnalyze()
     {
         try
@@ -273,6 +315,11 @@ public sealed class DumpStore : IStore
         if (_runtime.IsValueCreated)
         {
             try { _runtime.Value?.Dispose(); } catch { }
+        }
+        lock (_regLock)
+        {
+            try { _regSession?.Dispose(); } catch { }
+            _regSession = null;
         }
         _target.Dispose();
     }

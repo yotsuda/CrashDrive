@@ -68,6 +68,7 @@ public sealed class TtdProvider : ProviderBase
         PositionThreadsFolder,                      // positions/<pos>/threads/
         PositionThreadFolder,                       // positions/<pos>/threads/<tid>/
         PositionThreadInfoFile,                     // positions/<pos>/threads/<tid>/info.json
+        PositionThreadRegistersFile,                // positions/<pos>/threads/<tid>/registers.txt
         PositionThreadFramesFolder,                 // positions/<pos>/threads/<tid>/frames/
         PositionFrameFile,                          // positions/<pos>/threads/<tid>/frames/<n>.json
 
@@ -145,6 +146,7 @@ public sealed class TtdProvider : ProviderBase
                     return sub switch
                     {
                         "info.json" => new(PathKind.PositionThreadInfoFile, segs, EncodedPosition: encPos, ThreadId: tid),
+                        "registers.txt" => new(PathKind.PositionThreadRegistersFile, segs, EncodedPosition: encPos, ThreadId: tid),
                         "frames" => new(PathKind.PositionThreadFramesFolder, segs, EncodedPosition: encPos, ThreadId: tid),
                         _ => new(PathKind.Invalid, segs),
                     };
@@ -311,7 +313,8 @@ public sealed class TtdProvider : ProviderBase
                 break;
 
             case PathKind.Summary or PathKind.Timeline
-                or PathKind.PositionInfoFile or PathKind.PositionThreadInfoFile:
+                or PathKind.PositionInfoFile or PathKind.PositionThreadInfoFile
+                or PathKind.PositionThreadRegistersFile:
                 WriteFile(name, path, dir);
                 break;
 
@@ -457,6 +460,7 @@ public sealed class TtdProvider : ProviderBase
 
             case PathKind.PositionThreadFolder:
                 yield return ("info.json", false);
+                yield return ("registers.txt", false);
                 yield return ("frames", true);
                 break;
 
@@ -649,6 +653,7 @@ public sealed class TtdProvider : ProviderBase
 
             case PathKind.PositionThreadFolder:
                 WriteFile("info.json", MakePath(path, "info.json"), dir);
+                WriteFile("registers.txt", MakePath(path, "registers.txt"), dir);
                 WriteFolder("frames", MakePath(path, "frames"), dir, "stack frames", null);
                 break;
 
@@ -700,6 +705,9 @@ public sealed class TtdProvider : ProviderBase
 
             PathKind.PositionThreadInfoFile when info.EncodedPosition != null && info.ThreadId != null
                 => SerializeThreadInfo(info),
+
+            PathKind.PositionThreadRegistersFile when info.EncodedPosition != null && info.ThreadId != null
+                => Store.RenderRegistersAtPosition(ResolvePosition(info.EncodedPosition), info.ThreadId),
 
             PathKind.PositionFrameFile when info.EncodedPosition != null
                     && info.ThreadId != null && info.FrameIndex is int fi
