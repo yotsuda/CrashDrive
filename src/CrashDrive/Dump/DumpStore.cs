@@ -1,3 +1,4 @@
+using CrashDrive.DbgEng;
 using CrashDrive.Store;
 using Microsoft.Diagnostics.Runtime;
 
@@ -50,6 +51,8 @@ public sealed class DumpStore : IStore
             LazyThreadSafetyMode.ExecutionAndPublication);
         _summary = new Lazy<DumpSummary>(BuildSummary,
             LazyThreadSafetyMode.ExecutionAndPublication);
+        _analyzeOutput = new Lazy<string>(RunAnalyze,
+            LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     public bool HasClr => _target.ClrVersions.Length > 0;
@@ -81,6 +84,47 @@ public sealed class DumpStore : IStore
 
     private readonly object _heapLock = new();
     private IReadOnlyList<DumpTypeStats>? _heapTypesCache;
+
+    // ─── !analyze -v (via dbgeng) ────────────────────────────────────
+    //
+    // Microsoft's crash-triage heuristics live in ext.dll / !analyze, which is
+    // effectively unreplayable from scratch. Opening a second dbgeng session
+    // against the same dump and running the command there is the pragmatic
+    // way to surface its output. Lazy — most users never ask for it.
+
+    private readonly Lazy<string> _analyzeOutput;
+
+    /// <summary>Run `!analyze -v` via dbgeng and return the captured text. Cached.</summary>
+    public string AnalyzeOutput => _analyzeOutput.Value;
+
+    private string RunAnalyze()
+    {
+        try
+        {
+            using var session = DbgEngSession.Open(FilePath, _symbolPath);
+            // Short-circuit on non-crash snapshots: .exr -1 dumps the last exception
+            // record, or prints "ExceptionAddress: 0000000000000000" / similar when
+            // none exists. !analyze -v on a snapshot still runs (slowly) but has no
+            // useful output — prefer explicit messaging to a 10-minute symbol walk.
+            var exr = session.Execute(".exr -1");
+            if (string.IsNullOrWhiteSpace(exr)
+                || exr.Contains("ExceptionAddress: 0000000000000000", StringComparison.OrdinalIgnoreCase)
+                || exr.Contains("No exception record", StringComparison.OrdinalIgnoreCase)
+                || exr.Contains("no stored exception", StringComparison.OrdinalIgnoreCase))
+            {
+                return "!analyze -v skipped: no exception record in this dump " +
+                    "(likely a process snapshot rather than a crash).\n" +
+                    "Run analysis manually via dbgeng if needed, or regenerate this " +
+                    "dump from an actual crash.\n\n" +
+                    "--- .exr -1 output ---\n" + exr;
+            }
+            return session.Execute("!analyze -v");
+        }
+        catch (Exception ex)
+        {
+            return $"!analyze -v failed: {ex.GetType().Name}: {ex.Message}";
+        }
+    }
 
     private IReadOnlyList<DumpTypeStats> BuildHeapTypes()
     {

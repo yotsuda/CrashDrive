@@ -63,7 +63,7 @@ public sealed class DumpProvider : ProviderBase
 
     private enum PathKind
     {
-        Root, Summary,
+        Root, Summary, Analyze,
         ThreadsFolder, ThreadFolder, ThreadInfo, ThreadStack, ThreadException,
         ThreadFramesFolder, FrameFile,
         ModulesFolder, ModuleFile,
@@ -90,6 +90,7 @@ public sealed class DumpProvider : ProviderBase
             return head switch
             {
                 "summary.json" => new(PathKind.Summary, segs),
+                "analyze.txt" => new(PathKind.Analyze, segs),
                 "threads" => new(PathKind.ThreadsFolder, segs),
                 "modules" => new(PathKind.ModulesFolder, segs),
                 "heap" => new(PathKind.HeapFolder, segs),
@@ -251,7 +252,7 @@ public sealed class DumpProvider : ProviderBase
                 }
                 break;
 
-            case PathKind.Summary or PathKind.ThreadInfo or PathKind.ThreadStack
+            case PathKind.Summary or PathKind.Analyze or PathKind.ThreadInfo or PathKind.ThreadStack
                 or PathKind.ThreadException:
                 WriteFile(name, path, dir);
                 break;
@@ -308,6 +309,7 @@ public sealed class DumpProvider : ProviderBase
         {
             case PathKind.Root:
                 yield return ("summary.json", false);
+                yield return ("analyze.txt", false);
                 yield return ("threads", true);
                 yield return ("modules", true);
                 yield return ("heap", true);
@@ -354,6 +356,7 @@ public sealed class DumpProvider : ProviderBase
         {
             case PathKind.Root:
                 WriteFile("summary.json", MakePath(path, "summary.json"), dir);
+                WriteFile("analyze.txt", MakePath(path, "analyze.txt"), dir);
                 WriteFolder("threads", MakePath(path, "threads"), dir,
                     "threads at time of dump", Store.Summary.ThreadCount);
                 WriteFolder("modules", MakePath(path, "modules"), dir,
@@ -461,6 +464,7 @@ public sealed class DumpProvider : ProviderBase
         return info.Kind switch
         {
             PathKind.Summary => JsonSerializer.Serialize(Store.Summary, TraceJson.Options),
+            PathKind.Analyze => Store.AnalyzeOutput,
             PathKind.ThreadInfo when info.ThreadId is int tid
                 => Store.Threads.FirstOrDefault(x => x.ManagedThreadId == tid) is { } t
                     ? JsonSerializer.Serialize(t, TraceJson.Options) : "{}",

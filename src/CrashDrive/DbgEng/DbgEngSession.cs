@@ -40,13 +40,14 @@ public sealed class DbgEngSession : IDisposable
         // If opening a TTD trace, pre-load the WinDbg Preview dbgeng.dll
         // which supports TTD. The system32 dbgeng.dll does not.
         var isTtd = path.EndsWith(".run", StringComparison.OrdinalIgnoreCase);
-        if (isTtd)
-        {
-            if (!DbgEngNative.TryLoadWinDbgDbgEng(out var loadDiag))
-                throw new InvalidOperationException(
-                    "Opening .run (TTD) files requires WinDbg Preview (install via 'winget install Microsoft.WinDbg'). " +
-                    "Set CRASHDRIVE_DBGENG_DIR to override detection. Details: " + loadDiag);
-        }
+        // Always prefer WinDbg Preview's dbgeng when available: it's required for
+        // TTD, and for .dmp it brings the full extension set (ext.dll with !analyze
+        // etc.) that system32's dbgeng ships without. Failure is only fatal for TTD.
+        var haveWinDbg = DbgEngNative.TryLoadWinDbgDbgEng(out var loadDiag);
+        if (isTtd && !haveWinDbg)
+            throw new InvalidOperationException(
+                "Opening .run (TTD) files requires WinDbg Preview (install via 'winget install Microsoft.WinDbg'). " +
+                "Set CRASHDRIVE_DBGENG_DIR to override detection. Details: " + loadDiag);
 
         // Create the client as IDebugClient5 directly.
         var iid = DbgEngIIDs.IDebugClient5;
@@ -87,12 +88,12 @@ public sealed class DbgEngSession : IDisposable
             HResult.ThrowOnFailure(openHr, $"OpenDumpFileWide({path})");
         }
 
-        // Apply symbol path if provided — set BEFORE WaitForEvent so symbols
-        // are used during initial event processing.
+        // Apply symbol path if explicit. Without one, keep dbgeng's default —
+        // adding a sympath with a remote (msdl) component at session init makes
+        // WaitForEvent and module-list bootstrap trigger network lookups, which
+        // can block for minutes on a 150-module dump on the first run.
         if (!string.IsNullOrEmpty(symbolPath))
-        {
             control.Execute(DebugOutctl.ThisClient, $".sympath {symbolPath}", DebugExecute.NotLogged);
-        }
 
         // Wait for the engine to process the file and surface the initial event.
         HResult.ThrowOnFailure(
