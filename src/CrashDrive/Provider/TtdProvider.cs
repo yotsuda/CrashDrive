@@ -212,7 +212,21 @@ public sealed class TtdProvider : ProviderBase
     // === Path operations ===
 
     protected override bool ItemExists(string path)
-        => Parse(NormalizePath(path)).Kind != PathKind.Invalid;
+    {
+        var info = Parse(NormalizePath(path));
+        return info.Kind switch
+        {
+            PathKind.Invalid => false,
+            PathKind.EventFile
+                => info.Index is int i && i >= 0 && i < Store.Events.Count,
+            PathKind.CallFile when info.Module != null && info.Function != null && info.Index is int ci
+                => ci >= 0 && ci < Store.GetCalls(info.Module, info.Function).Count,
+            PathKind.MemoryAccessFile when info.MemStart != null && info.MemEnd != null
+                && info.AccessMode != null && info.Index is int mi
+                => mi >= 0 && mi < Store.GetMemoryAccesses(info.MemStart, info.MemEnd, info.AccessMode).Count,
+            _ => true,
+        };
+    }
 
     protected override bool IsItemContainer(string path)
     {

@@ -132,7 +132,20 @@ public sealed class TraceProvider : ProviderBase
     protected override bool ItemExists(string path)
     {
         var info = Parse(NormalizePath(path));
-        return info.Kind != PathKind.Invalid;
+        return info.Kind switch
+        {
+            PathKind.Invalid => false,
+            PathKind.EventFile or PathKind.ByTypeEvent or PathKind.ByFunctionEvent
+                => info.Seq is int s && Store.BySeq.ContainsKey(s),
+            PathKind.ByTypeCategory
+                => info.Category != null && Store.ByType.ContainsKey(info.Category),
+            PathKind.ByFunctionCategory
+                => info.Category != null && Store.ByFunction.ContainsKey(info.Category),
+            PathKind.ExceptionFolder or PathKind.ExceptionEvent
+                or PathKind.ExceptionContext or PathKind.ExceptionStack
+                => info.ExceptionIndex is int xi && xi >= 1 && xi <= Store.Exceptions.Count,
+            _ => true,
+        };
     }
 
     protected override bool IsItemContainer(string path)

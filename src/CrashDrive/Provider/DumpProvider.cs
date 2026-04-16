@@ -136,7 +136,27 @@ public sealed class DumpProvider : ProviderBase
     // === Path operations ===
 
     protected override bool ItemExists(string path)
-        => Parse(NormalizePath(path)).Kind != PathKind.Invalid;
+    {
+        var info = Parse(NormalizePath(path));
+        return info.Kind switch
+        {
+            PathKind.Invalid => false,
+            PathKind.ThreadFolder or PathKind.ThreadInfo or PathKind.ThreadStack
+                or PathKind.ThreadException or PathKind.ThreadFramesFolder
+                => info.ThreadId is int tid && Store.Threads.Any(t => t.ManagedThreadId == tid),
+            PathKind.FrameFile
+                => info.ThreadId is int tid && info.FrameIndex is int fi
+                   && Store.Threads.FirstOrDefault(t => t.ManagedThreadId == tid) is { } th
+                   && fi >= 0 && fi < th.Frames.Count,
+            PathKind.ModuleFile
+                => info.ModuleFile != null && Store.Modules.Any(m =>
+                    Sanitize(m.FileName).Equals(info.ModuleFile, StringComparison.OrdinalIgnoreCase)),
+            PathKind.HeapTypeFile
+                => info.TypeName != null && Store.HeapTypes.Any(t =>
+                    SanitizeFull(t.TypeName).Equals(info.TypeName, StringComparison.Ordinal)),
+            _ => true,
+        };
+    }
 
     protected override bool IsItemContainer(string path)
     {
