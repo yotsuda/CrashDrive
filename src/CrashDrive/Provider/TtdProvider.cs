@@ -85,6 +85,8 @@ public sealed class TtdProvider : ProviderBase
         CallsModuleFolder,                          // calls/<module>/
         CallsFunctionFolder,                        // calls/<module>/<function>/
         CallFile,                                   // calls/<module>/<function>/<n>.json
+        CallsRangeFolder,                           // calls/<module>/<function>/<start>-<end>/
+        CallsRangeFile,                             // calls/<module>/<function>/<start>-<end>/<n>.json
 
         MemoryFolder,                               // memory/
         MemoryRangeFolder,                          // memory/<start>_<end>/
@@ -108,7 +110,24 @@ public sealed class TtdProvider : ProviderBase
         string? Function = null,
         string? MemStart = null,
         string? MemEnd = null,
-        string? AccessMode = null);
+        string? AccessMode = null,
+        int? RangeStart = null,
+        int? RangeEnd = null);
+
+    /// <summary>Pagination threshold for <c>calls\&lt;mod&gt;\&lt;fn&gt;\</c>. Hit lists with
+    /// more entries are exposed as <c>&lt;start&gt;-&lt;end&gt;\</c> subfolders instead of
+    /// thousands of .json siblings — avoids multi-second <c>ls</c> hangs.</summary>
+    private const int CallPageSize = 256;
+
+    private static bool TryParseCallsRange(string seg, out int start, out int end)
+    {
+        start = end = 0;
+        var dash = seg.IndexOf('-');
+        if (dash <= 0 || dash == seg.Length - 1) return false;
+        if (!int.TryParse(seg.AsSpan(0, dash), out start)) return false;
+        if (!int.TryParse(seg.AsSpan(dash + 1), out end)) return false;
+        return start >= 0 && end >= start;
+    }
 
     private ParsedPath Parse(string path)
     {
@@ -199,13 +218,28 @@ public sealed class TtdProvider : ProviderBase
 
         if (head == "calls")
         {
-            // calls/<module>[/<function>[/<n>.json]]
+            // calls/<module>[/<function>[/<n>.json|<start>-<end>[/<n>.json]]]
             if (segs.Length == 2) return new(PathKind.CallsModuleFolder, segs, Module: segs[1]);
             if (segs.Length == 3) return new(PathKind.CallsFunctionFolder, segs, Module: segs[1], Function: segs[2]);
-            if (segs.Length == 4
-                && segs[3].EndsWith(".json", StringComparison.OrdinalIgnoreCase)
-                && int.TryParse(segs[3][..^5], out var callIdx))
-                return new(PathKind.CallFile, segs, Module: segs[1], Function: segs[2], Index: callIdx);
+            if (segs.Length == 4)
+            {
+                if (segs[3].EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                    && int.TryParse(segs[3][..^5], out var callIdx))
+                    return new(PathKind.CallFile, segs, Module: segs[1], Function: segs[2], Index: callIdx);
+                if (TryParseCallsRange(segs[3], out var rs, out var re))
+                    return new(PathKind.CallsRangeFolder, segs,
+                        Module: segs[1], Function: segs[2], RangeStart: rs, RangeEnd: re);
+            }
+            if (segs.Length == 5
+                && TryParseCallsRange(segs[3], out var rs2, out var re2)
+                && segs[4].EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(segs[4][..^5], out var rnIdx)
+                && rnIdx >= rs2 && rnIdx <= re2)
+            {
+                return new(PathKind.CallsRangeFile, segs,
+                    Module: segs[1], Function: segs[2],
+                    RangeStart: rs2, RangeEnd: re2, Index: rnIdx);
+            }
         }
 
         if (head == "memory")
@@ -284,7 +318,13 @@ public sealed class TtdProvider : ProviderBase
             PathKind.TimelineSignificantFile
                 => info.Index is int tsi && tsi >= 0 && tsi < Store.SignificantEvents.Count,
             PathKind.CallFile when info.Module != null && info.Function != null && info.Index is int ci
-                => ci >= 0 && ci < Store.GetCalls(info.Module, info.Function).Count,
+                => ci >= 0 && ci < Store.GetCallCount(info.Module, info.Function),
+            PathKind.CallsRangeFolder when info.Module != null && info.Function != null
+                    && info.RangeStart is int crs
+                => crs < Store.GetCallCount(info.Module, info.Function),
+            PathKind.CallsRangeFile when info.Module != null && info.Function != null
+                    && info.Index is int cri
+                => cri >= 0 && cri < Store.GetCallCount(info.Module, info.Function),
             PathKind.MemoryAccessFile when info.MemStart != null && info.MemEnd != null
                 && info.AccessMode != null && info.Index is int mi
                 => mi >= 0 && mi < Store.GetMemoryAccesses(info.MemStart, info.MemEnd, info.AccessMode).Count,
@@ -309,7 +349,7 @@ public sealed class TtdProvider : ProviderBase
             PathKind.PositionThreadsFolder or PathKind.PositionThreadFolder or
             PathKind.PositionThreadFramesFolder or
             PathKind.CallsFolder or PathKind.CallsModuleFolder or
-            PathKind.CallsFunctionFolder or
+            PathKind.CallsFunctionFolder or PathKind.CallsRangeFolder or
             PathKind.MemoryFolder or PathKind.MemoryRangeFolder or
             PathKind.MemoryAccessKindFolder or
             PathKind.MemoryLastWriteBeforeFolder => true,
@@ -350,18 +390,45 @@ public sealed class TtdProvider : ProviderBase
 
             case PathKind.CallFile when info.Module != null && info.Function != null
                     && info.Index is int ci:
-                var calls = Store.GetCalls(info.Module, info.Function);
-                if (ci >= 0 && ci < calls.Count)
                 {
-                    var c = calls[ci];
-                    WriteItemObject(new Models.TtdCallItem
+                    var chunk = Store.GetCalls(info.Module, info.Function, skip: ci, take: 1);
+                    var c = chunk.FirstOrDefault(x => x.Index == ci);
+                    if (c != null)
                     {
-                        Index = ci, Name = name,
-                        ThreadId = c.ThreadId, TimeStart = c.TimeStart,
-                        TimeEnd = c.TimeEnd, ReturnValue = c.ReturnValue,
-                        Path = EnsureDrivePrefix(path), Directory = dir,
-                    }, path, isContainer: false);
+                        WriteItemObject(new Models.TtdCallItem
+                        {
+                            Index = ci, Name = name,
+                            ThreadId = c.ThreadId, TimeStart = c.TimeStart,
+                            TimeEnd = c.TimeEnd, ReturnValue = c.ReturnValue,
+                            Path = EnsureDrivePrefix(path), Directory = dir,
+                        }, path, isContainer: false);
+                    }
                 }
+                break;
+
+            case PathKind.CallsRangeFile when info.Module != null && info.Function != null
+                    && info.Index is int cri:
+                {
+                    var chunk = Store.GetCalls(info.Module, info.Function, skip: cri, take: 1);
+                    var c = chunk.FirstOrDefault(x => x.Index == cri);
+                    if (c != null)
+                    {
+                        WriteItemObject(new Models.TtdCallItem
+                        {
+                            Index = cri, Name = name,
+                            ThreadId = c.ThreadId, TimeStart = c.TimeStart,
+                            TimeEnd = c.TimeEnd, ReturnValue = c.ReturnValue,
+                            Path = EnsureDrivePrefix(path), Directory = dir,
+                        }, path, isContainer: false);
+                    }
+                }
+                break;
+
+            case PathKind.CallsRangeFolder when info.Module != null && info.Function != null
+                    && info.RangeStart is int rfs && info.RangeEnd is int rfe:
+                WriteFolder(name, path, dir,
+                    $"calls {rfs}..{rfe} of {info.Module}!{info.Function}",
+                    rfe - rfs + 1);
                 break;
 
             case PathKind.MemoryAccessFile when info.MemStart != null && info.MemEnd != null
@@ -608,8 +675,28 @@ public sealed class TtdProvider : ProviderBase
             case PathKind.CallsFunctionFolder:
                 if (info.Module != null && info.Function != null)
                 {
-                    var calls = Store.GetCalls(info.Module, info.Function);
-                    for (int i = 0; i < calls.Count; i++)
+                    var count = Store.GetCallCount(info.Module, info.Function);
+                    if (count <= CallPageSize)
+                    {
+                        for (int i = 0; i < count; i++)
+                            yield return ($"{i}.json", false);
+                    }
+                    else
+                    {
+                        // Surface pages as <start>-<end>\ instead of thousands of siblings.
+                        for (int start = 0; start < count; start += CallPageSize)
+                        {
+                            var end = Math.Min(start + CallPageSize - 1, count - 1);
+                            yield return ($"{start}-{end}", true);
+                        }
+                    }
+                }
+                break;
+
+            case PathKind.CallsRangeFolder:
+                if (info.RangeStart is int rs && info.RangeEnd is int re)
+                {
+                    for (int i = rs; i <= re; i++)
                         yield return ($"{i}.json", false);
                 }
                 break;
@@ -706,24 +793,31 @@ public sealed class TtdProvider : ProviderBase
             case PathKind.CallsFunctionFolder:
                 if (info.Module != null && info.Function != null)
                 {
-                    var calls = Store.GetCalls(info.Module, info.Function);
-                    for (int i = 0; i < calls.Count; i++)
+                    var count = Store.GetCallCount(info.Module, info.Function);
+                    if (count <= CallPageSize)
                     {
-                        if (Stopping) return;
-                        var c = calls[i];
-                        var cPath = MakePath(path, $"{i}.json");
-                        WriteItemObject(new Models.TtdCallItem
-                        {
-                            Index = i,
-                            Name = $"{i}.json",
-                            ThreadId = c.ThreadId,
-                            TimeStart = c.TimeStart,
-                            TimeEnd = c.TimeEnd,
-                            ReturnValue = c.ReturnValue,
-                            Path = EnsureDrivePrefix(cPath),
-                            Directory = dir,
-                        }, cPath, isContainer: false);
+                        WriteCallRangeItems(info.Module, info.Function, path, dir, 0, count - 1);
                     }
+                    else
+                    {
+                        for (int start = 0; start < count; start += CallPageSize)
+                        {
+                            if (Stopping) return;
+                            var end = Math.Min(start + CallPageSize - 1, count - 1);
+                            var name = $"{start}-{end}";
+                            WriteFolder(name, MakePath(path, name), dir,
+                                $"calls {start}..{end} of {info.Module}!{info.Function}",
+                                end - start + 1);
+                        }
+                    }
+                }
+                break;
+
+            case PathKind.CallsRangeFolder:
+                if (info.Module != null && info.Function != null
+                    && info.RangeStart is int rsCh && info.RangeEnd is int reCh)
+                {
+                    WriteCallRangeItems(info.Module, info.Function, path, dir, rsCh, reCh);
                 }
                 break;
 
@@ -898,6 +992,10 @@ public sealed class TtdProvider : ProviderBase
                     && info.Index is int callIdx
                 => SerializeCall(info.Module, info.Function, callIdx),
 
+            PathKind.CallsRangeFile when info.Module != null && info.Function != null
+                    && info.Index is int rnCallIdx
+                => SerializeCall(info.Module, info.Function, rnCallIdx),
+
             PathKind.MemoryAccessFile when info.MemStart != null && info.MemEnd != null
                     && info.AccessMode != null && info.Index is int memIdx
                 => SerializeMemoryAccess(info.MemStart, info.MemEnd, info.AccessMode, memIdx),
@@ -927,11 +1025,13 @@ public sealed class TtdProvider : ProviderBase
 
     private string SerializeCall(string module, string function, int index)
     {
-        var calls = Store.GetCalls(module, function);
-        if (index < 0 || index >= calls.Count) return "{}";
-        // Fetch parameters only when reading a specific call — avoids N×param queries
-        // during folder enumeration.
-        var call = calls[index];
+        if (index < 0) return "{}";
+        // Targeted single-record fetch; the paged GetCalls overload pins Index
+        // to the absolute position so we can match by identity.
+        var chunk = Store.GetCalls(module, function, skip: index, take: 1);
+        var call = chunk.FirstOrDefault(c => c.Index == index);
+        if (call == null) return "{}";
+        // Parameters are per-call + lazy to avoid N×param queries during enum.
         call.Parameters = Store.GetCallParameters(module, function, index);
         return JsonSerializer.Serialize(call, TraceJson.Options);
     }
@@ -1075,6 +1175,32 @@ public sealed class TtdProvider : ProviderBase
             Description = desc,
             Count = count,
         }, itemPath, isContainer: true);
+    }
+
+    /// <summary>Write one TtdCallItem per index in [start..end] inclusive.
+    /// Shared by the flat (≤256 total) and paged (range-folder) code paths.</summary>
+    private void WriteCallRangeItems(string module, string function, string path,
+        string directory, int start, int end)
+    {
+        if (end < start) return;
+        var chunk = Store.GetCalls(module, function, skip: start, take: end - start + 1);
+        foreach (var c in chunk)
+        {
+            if (Stopping) return;
+            var childName = $"{c.Index}.json";
+            var childPath = MakePath(path, childName);
+            WriteItemObject(new Models.TtdCallItem
+            {
+                Index = c.Index,
+                Name = childName,
+                ThreadId = c.ThreadId,
+                TimeStart = c.TimeStart,
+                TimeEnd = c.TimeEnd,
+                ReturnValue = c.ReturnValue,
+                Path = EnsureDrivePrefix(childPath),
+                Directory = directory,
+            }, childPath, isContainer: false);
+        }
     }
 
     private void WriteFile(string name, string itemPath, string directory)

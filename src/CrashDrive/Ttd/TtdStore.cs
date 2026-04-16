@@ -329,18 +329,53 @@ public sealed class TtdStore : IStore
     }
 
     /// <summary>
+    /// Total number of calls for this function. Cheap — single dx .Count().
+    /// Used by the provider to decide whether to paginate the call-hit folder.
+    /// Returns 0 if the function never executed or the query fails.
+    /// </summary>
+    public int GetCallCount(string module, string function) => WithSession(session =>
+    {
+        var expr = $"@$cursession.TTD.Calls(\"{module}!{function}\").Count()";
+        string text;
+        try { text = session.Dx(expr); }
+        catch { return 0; }
+
+        // dx output: "@$cursession.TTD.Calls(...).Count() : 0x3e8" or ": 0x3e8 (1000)"
+        var colon = text.IndexOf(':');
+        if (colon <= 0) return 0;
+        var val = text[(colon + 1)..].Trim();
+        var space = val.IndexOf(' ');
+        if (space > 0) val = val[..space];
+        if (val.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(val[2..], System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture, out var hex))
+            return hex;
+        return int.TryParse(val, out var dec) ? dec : 0;
+    });
+
+    /// <summary>
     /// Execute TTD.Calls("module!function") and return structured call records.
     /// Each record spans a time range (entry → exit) and carries argument registers
     /// plus the return value.
     /// </summary>
-    public IReadOnlyList<TtdCall> GetCalls(string module, string function, int maxRecords = 500) => WithSession(session =>
+    public IReadOnlyList<TtdCall> GetCalls(string module, string function, int maxRecords = 500)
+        => GetCalls(module, function, skip: 0, take: maxRecords);
+
+    /// <summary>
+    /// Paginated variant. The returned list carries absolute indices (Index = skip + i)
+    /// so the provider can expose the same numeric identity whether hits are browsed
+    /// directly (<![CDATA[calls\<mod>\<fn>\<n>.json]]>) or via a page range.
+    /// </summary>
+    public IReadOnlyList<TtdCall> GetCalls(string module, string function, int skip, int take) => WithSession(session =>
     {
         var result = new List<TtdCall>();
+        if (take <= 0) return (IReadOnlyList<TtdCall>)result;
         var functionFullName = $"{module}!{function}";
         var baseExpr = $"@$cursession.TTD.Calls(\"{functionFullName}\")";
 
-        // Projection gives all core fields in one dx call.
-        var proj = $"{baseExpr}.Take({maxRecords}).Select(c => new {{ " +
+        // Single dx call projects all core fields for the requested window.
+        var skipClause = skip > 0 ? $".Skip({skip})" : string.Empty;
+        var proj = $"{baseExpr}{skipClause}.Take({take}).Select(c => new {{ " +
                    "T = c.ThreadId, S = c.TimeStart, E = c.TimeEnd, " +
                    "FA = c.FunctionAddress, RA = c.ReturnAddress, RV = c.ReturnValue })";
 
@@ -348,12 +383,12 @@ public sealed class TtdStore : IStore
         try { text = session.Dx(proj, recursion: 2); }
         catch { return (IReadOnlyList<TtdCall>)result; }
 
-        var idx = 0;
+        var offset = 0;
         foreach (var record in ParseProjectedRecords(text))
         {
-            var call = new TtdCall
+            result.Add(new TtdCall
             {
-                Index = idx++,
+                Index = skip + offset++,
                 Function = functionFullName,
                 ThreadId = record.GetValueOrDefault("T", ""),
                 TimeStart = record.GetValueOrDefault("S", ""),
@@ -361,10 +396,7 @@ public sealed class TtdStore : IStore
                 FunctionAddress = record.GetValueOrDefault("FA", ""),
                 ReturnAddress = record.GetValueOrDefault("RA", ""),
                 ReturnValue = record.GetValueOrDefault("RV", ""),
-            };
-            // Fetch parameters lazily only for the requested index (when file is read)
-            // For folder enumeration we skip — avoids N×M queries.
-            result.Add(call);
+            });
         }
         return (IReadOnlyList<TtdCall>)result;
     });

@@ -100,6 +100,37 @@ Describe 'TTD provider' -Tag 'Ttd' -Skip:(-not $HasTtd) {
         $names | Should -Contain 'summary.json'
         $names | Should -Contain 'timeline'
     }
+
+    It 'paginates calls\<mod>\<fn>\ into <start>-<end> folders when count exceeds 256' {
+        # python01.run: python313!PyObject_IsTrue has 1042 hits => 5 page folders
+        New-CrashDrive smoke_ttd $TtdPath
+        $pages = Get-ChildItem smoke_ttd:\calls\python313\PyObject_IsTrue
+        $pages.Name | Should -Contain '0-255'
+        $pages.Name | Should -Contain '256-511'
+        $pages.Name | Should -Contain '1024-1041'
+        ($pages | Where-Object Name -like '*-*').Count | Should -Be $pages.Count `
+            -Because 'a paginated folder should show only range containers, no .json siblings'
+
+        # Items inside a page carry ABSOLUTE indices
+        $mid = Get-ChildItem smoke_ttd:\calls\python313\PyObject_IsTrue\512-767 |
+               Select-Object -First 1
+        $mid.Index | Should -Be 512
+        $mid.Name  | Should -Be '512.json'
+
+        # Deep read pulls the right call
+        $json = (Get-Content smoke_ttd:\calls\python313\PyObject_IsTrue\1024-1041\1024.json) -join "`n" |
+                ConvertFrom-Json
+        $json.Index    | Should -Be 1024
+        $json.Function | Should -Be 'python313!PyObject_IsTrue'
+    }
+
+    It 'leaves calls\<mod>\<fn>\ flat when count is 256 or fewer' {
+        # python01.run: python313!Py_Main has 1 hit => flat (no page folders)
+        New-CrashDrive smoke_ttd $TtdPath
+        $items = Get-ChildItem smoke_ttd:\calls\python313\Py_Main
+        $items.Name | Should -Contain '0.json'
+        ($items | Where-Object Name -match '^\d+-\d+$').Count | Should -Be 0
+    }
 }
 
 Describe 'Capture round-trip (Python)' -Tag 'Capture' -Skip:(-not $HasPy) {
