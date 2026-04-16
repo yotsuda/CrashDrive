@@ -1,0 +1,1766 @@
+<?xml version="1.0" encoding="utf-8"?>
+<helpItems xmlns:maml="http://schemas.microsoft.com/maml/2004/10" xmlns:command="http://schemas.microsoft.com/maml/dev/command/2004/10" xmlns:dev="http://schemas.microsoft.com/maml/dev/2004/10" schema="maml" xmlns="http://msh">
+  <command:command>
+    <command:details>
+      <command:name>Disable-CrashEditorFollow</command:name>
+      <maml:description>
+        <maml:para>`Enable-CrashEditorFollow` で設定したカレントロケーション変更フックを解除し、`cd` 時のエディタ自動ジャンプを無効化します。</maml:para>
+      </maml:description>
+      <command:verb>Disable</command:verb>
+      <command:noun>CrashEditorFollow</command:noun>
+    </command:details>
+    <maml:description>
+      <maml:para>`Disable-CrashEditorFollow` はランスペースの `LocationChangedAction` を `$null` に戻します。`Enable-CrashEditorFollow` で登録したフックが解除され、以降の `cd` ではエディタが起動しなくなります。</maml:para>
+      <maml:para>`Enable-CrashEditorFollow` を呼んでいない状態で呼んでも副作用はなく (既に `$null` に `$null` を代入するだけ)、安全に何度でも実行できます。</maml:para>
+      <maml:para>CrashDrive 本体の動作には影響しません。ドライブのマウントや `ls` / `cat` はそのまま使えます。</maml:para>
+    </maml:description>
+    <command:syntax>
+      <command:syntaxItem>
+        <maml:name>Disable-CrashEditorFollow</maml:name>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters />
+    <command:inputTypes>
+      <command:inputType>
+        <dev:type>
+          <dev:name>None</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>パイプライン入力はありません。</maml:para>
+        </maml:description>
+      </command:inputType>
+    </command:inputTypes>
+    <command:returnValues>
+      <command:returnValue>
+        <dev:type>
+          <dev:name>None</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>出力はありません (`-Verbose` 時のみ解除された旨が出力されます)。</maml:para>
+        </maml:description>
+      </command:returnValue>
+    </command:returnValues>
+    <maml:alertSet>
+      <maml:alert>
+        <maml:para>- `Enable-CrashEditorFollow` を呼んでいない状態で実行しても副作用はありません (冪等)。
+- 他の PowerShell モジュールやユーザースクリプトが `LocationChangedAction` に独自のハンドラを入れている場合、本 cmdlet はそれらも `$null` に戻します。共存する構成では最後に何を設定するかに注意してください。
+- セッションを閉じれば設定は破棄されるため、明示的に `Disable-CrashEditorFollow` を呼ばなくても次回起動時には無効状態から始まります。</maml:para>
+      </maml:alert>
+    </maml:alertSet>
+    <command:examples>
+      <command:example>
+        <maml:title>--------- Example 1: エディタフォローを無効化 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS C:\&gt; Disable-CrashEditorFollow
+```</maml:para>          <maml:para>`cd` による自動ジャンプが止まります。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 2: タブが増えすぎたので一時停止 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS dmp:\threads\12\frames\&gt; Disable-CrashEditorFollow
+PS dmp:\threads\12\frames\&gt; 0..50 | % { cd $_ ; Get-Item . }
+PS dmp:\threads\12\frames\&gt; Enable-CrashEditorFollow
+```</maml:para>          <maml:para>大量のフレームを走査する前に一時的に止めておき、作業が終わったら再度有効化します。エディタのタブ爆発を防ぐ定番パターンです。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 3: スクリプト末尾のクリーンアップで呼ぶ ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+try {
+    Enable-CrashEditorFollow
+    # ...調査...
+}
+finally {
+    Disable-CrashEditorFollow
+}
+```</maml:para>          <maml:para>関数やスクリプトの一時的な副作用として有効化している場合は `finally` で確実に解除しておくのが安全です。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+    </command:examples>
+    <command:relatedLinks>
+      <maml:navigationLink>
+        <maml:linkText>Enable-CrashEditorFollow</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>New-CrashDrive</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+    </command:relatedLinks>
+  </command:command>
+  <command:command>
+    <command:details>
+      <command:name>Enable-CrashEditorFollow</command:name>
+      <maml:description>
+        <maml:para>カレントロケーションが CrashDrive のパスに移動したとき、対応するソースファイル:行をエディタで自動的に開くモードを有効化します。</maml:para>
+      </maml:description>
+      <command:verb>Enable</command:verb>
+      <command:noun>CrashEditorFollow</command:noun>
+    </command:details>
+    <maml:description>
+      <maml:para>`Enable-CrashEditorFollow` はランスペースの `LocationChangedAction` に `cd` 時のフックを登録します。Trace / Dump / Ttd プロバイダのパスに `cd` したとき、対象アイテムが `SourceFile` と `Line` を持っていれば、指定エディタコマンドを非同期で起動してその位置へ飛びます。</maml:para>
+      <maml:para>既定では VS Code を想定し `code --goto "{file}:{line}"` を発行します。`-EditorCommand` と `-ArgumentsTemplate` を組み合わせることで、任意の CLI (Cursor / WebStorm / Vim 等) に差し替え可能です。`{file}` と `{line}` のプレースホルダが置換されます。</maml:para>
+      <maml:para>ソース解決が効く対象は以下です。</maml:para>
+      <maml:para>- **Dump**: ネイティブは dbgeng `ln`、マネージドは ClrMD + portable PDB (`DumpType.Full` 必須)。公開 Microsoft PDB には source info がないので飛べません。 - **TTD**: 同じく dbgeng `ln` 経路。 - **Trace**: Python トレーサーは実ファイル/行を持ちますが、.NET Harmony トレーサーは現状 `file=&lt;assembly-name&gt; line=0` なのでエディタは開きません (ロードマップ項目)。</maml:para>
+      <maml:para>無効化するには `Disable-CrashEditorFollow` を呼びます。セッション越しには永続化しないので、プロファイルで有効化することが多くなります。</maml:para>
+    </maml:description>
+    <command:syntax>
+      <command:syntaxItem>
+        <maml:name>Enable-CrashEditorFollow</maml:name>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>ArgumentsTemplate</maml:name>
+          <maml:description>
+            <maml:para>エディタコマンドに渡す引数テンプレート。`{file}` と `{line}` がそれぞれ解決済みのフルパスと行番号に置換されます。既定は `--goto "{file}:{line}"` (VS Code 向け)。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>EditorCommand</maml:name>
+          <maml:description>
+            <maml:para>起動するエディタの実行ファイル名またはフルパス。`code`、`cursor`、`gvim`、`C:\Program Files\...\idea64.exe` など PATH 解決できる任意のコマンドを指定可能。既定は `code`。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>ArgumentsTemplate</maml:name>
+        <maml:description>
+          <maml:para>エディタコマンドに渡す引数テンプレート。`{file}` と `{line}` がそれぞれ解決済みのフルパスと行番号に置換されます。既定は `--goto "{file}:{line}"` (VS Code 向け)。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>EditorCommand</maml:name>
+        <maml:description>
+          <maml:para>起動するエディタの実行ファイル名またはフルパス。`code`、`cursor`、`gvim`、`C:\Program Files\...\idea64.exe` など PATH 解決できる任意のコマンドを指定可能。既定は `code`。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:inputTypes>
+      <command:inputType>
+        <dev:type>
+          <dev:name>None</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>パイプライン入力はありません。</maml:para>
+        </maml:description>
+      </command:inputType>
+    </command:inputTypes>
+    <command:returnValues>
+      <command:returnValue>
+        <dev:type>
+          <dev:name>None</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>出力はありません (`-Verbose` 時のみ設定内容が出力されます)。</maml:para>
+        </maml:description>
+      </command:returnValue>
+    </command:returnValues>
+    <maml:alertSet>
+      <maml:alert>
+        <maml:para>- 設定はランスペースの `LocationChangedAction` を書き換える形で保持されます。別セッションには引き継がれないので、常用するならプロファイルでの有効化を推奨します。
+- ソース解決は Dump では `DumpType.Full` 推奨 (Normal dump はマネージドフレームで行が取れないことがあります)。公開 Microsoft PDB の `ln` は source info を含まないので飛べません。
+- .NET Harmony トレース (`Trace` プロバイダ) は現状 `file=&lt;assembly-name&gt; line=0` なのでエディタは起動しません。portable PDB の sequence point ルックアップ対応はロードマップ項目です。
+- エラーは握り潰されます (`try { ... } catch { }`): エディタが見つからない・起動できない場合でも CrashDrive 側の操作は中断されません。</maml:para>
+      </maml:alert>
+    </maml:alertSet>
+    <command:examples>
+      <command:example>
+        <maml:title>--------- Example 1: VS Code で有効化 (既定) ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS C:\&gt; Enable-CrashEditorFollow
+PS C:\&gt; cd dmp:\threads\12\frames\3
+```</maml:para>          <maml:para>既定設定 (`code --goto "{file}:{line}"`) で有効化し、`cd` するとそのフレームのソースで VS Code が開きます。ソース解決できないアイテムでは何もせず、エラーも出ません。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 2: Cursor で有効化 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS C:\&gt; Enable-CrashEditorFollow -EditorCommand cursor
+```</maml:para>          <maml:para>`EditorCommand` だけを差し替えて Cursor を起動します。引数テンプレートは既定 (`--goto "{file}:{line}"`) のまま流用できます。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 3: Vim (gvim) 用に引数テンプレートをカスタマイズ ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS C:\&gt; Enable-CrashEditorFollow -EditorCommand gvim -ArgumentsTemplate '+{line} "{file}"'
+```</maml:para>          <maml:para>エディタ固有の行ジャンプ構文に合わせてテンプレートを変えます。`{file}` と `{line}` は必ずテンプレート内で使ってください (置換対象)。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 4: プロファイルから常時有効化 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+# $PROFILE
+Import-Module CrashDrive
+Enable-CrashEditorFollow
+```</maml:para>          <maml:para>pwsh のプロファイルで有効化しておけば、セッション起動のたびに CrashDrive + editor-follow が即座に使える状態になります。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 5: 一時的に無効化 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS C:\&gt; Disable-CrashEditorFollow
+# ...デバッグ作業中は飛ばさない...
+PS C:\&gt; Enable-CrashEditorFollow
+```</maml:para>          <maml:para>タブが増えすぎるのを避けたいときは `Disable-CrashEditorFollow` で一時停止し、必要になったら再度 `Enable-CrashEditorFollow` を呼びます。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+    </command:examples>
+    <command:relatedLinks>
+      <maml:navigationLink>
+        <maml:linkText>Disable-CrashEditorFollow</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>New-CrashDrive</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Get-CrashLocalVariable</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+    </command:relatedLinks>
+  </command:command>
+  <command:command>
+    <command:details>
+      <command:name>Get-CrashLocalVariable</command:name>
+      <maml:description>
+        <maml:para>Dump / Ttd ドライブの特定スタックフレームにおけるローカル変数を dbgeng 経由で取得します。</maml:para>
+      </maml:description>
+      <command:verb>Get</command:verb>
+      <command:noun>CrashLocalVariable</command:noun>
+    </command:details>
+    <maml:description>
+      <maml:para>`Get-CrashLocalVariable` は dbgeng のコマンド列 `~~[0x&lt;tid&gt;]s; .frame 0n&lt;n&gt;; dv /V /i /t` を発行し、指定スレッド・指定フレームのローカル変数 (値 + 型 + 間接アドレス) を返します。TTD ドライブでは `-Position` により時間位置も指定できます。</maml:para>
+      <maml:para>出力の質は **シンボルの可用性に完全に依存します**。プライベートビルドやソースインデックス付き PDB があれば名前 / 型 / 値がすべて揃いますが、Microsoft の公開 PDB のように locals/params 情報を含まない PDB ではほとんど何も出ません (これはデータ側の制約で、回避策はありません)。</maml:para>
+      <maml:para>マネージドフレーム (JIT コード) に対しては dbgeng は JIT 出力しか見えず、メソッドシグネチャを知らないので `dv` は意味のある結果を返しません。正しいマネージドローカル取得には SOS 拡張が必要ですが、そちらはまだ配線されていません。当面は `Invoke-CrashCommand '!clrstack -l'` などを経由してください。</maml:para>
+      <maml:para>Dump ドライブでは `-ThreadId` にマネージドスレッド ID (例: `20`) を渡すと自動的に OS スレッド ID に解決されます。16 進の OS ID (`0x20` / `20` / `a098` など) もそのまま受け付けます。</maml:para>
+    </maml:description>
+    <command:syntax>
+      <command:syntaxItem>
+        <maml:name>Get-CrashLocalVariable</maml:name>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>Drive</maml:name>
+          <maml:description>
+            <maml:para>対象ドライブ名。省略時はカレントロケーションのドライブが使われます。Dump / Ttd 以外のドライブを指定するとエラーになります。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="1" aliases="none">
+          <maml:name>Frame</maml:name>
+          <maml:description>
+            <maml:para>対象フレームのインデックス (0 が最も内側)。`threads\&lt;id&gt;\frames\&lt;n&gt;` の `&lt;n&gt;` と一致します。</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="true">System.Int32</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>Position</maml:name>
+          <maml:description>
+            <maml:para>TTD 限定: 評価前にシークする位置。ネイティブ `major:minor`、パス形式 `major_minor`、`start` / `end` エイリアスを受け付けます。Dump ドライブでは無視されます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="0" aliases="none">
+          <maml:name>ThreadId</maml:name>
+          <maml:description>
+            <maml:para>対象スレッドの ID。TTD では 16 進 OS ID (`0x` 付き・なし両方) を受け付け、`~~[0x&lt;tid&gt;]s` としてスレッド切替されます。Dump では OS ID のほか、`ClrMD.ManagedThreadId` を 10 進で渡すと自動的に OS ID に解決されます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>Drive</maml:name>
+        <maml:description>
+          <maml:para>対象ドライブ名。省略時はカレントロケーションのドライブが使われます。Dump / Ttd 以外のドライブを指定するとエラーになります。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="1" aliases="none">
+        <maml:name>Frame</maml:name>
+        <maml:description>
+          <maml:para>対象フレームのインデックス (0 が最も内側)。`threads\&lt;id&gt;\frames\&lt;n&gt;` の `&lt;n&gt;` と一致します。</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="true">System.Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>Position</maml:name>
+        <maml:description>
+          <maml:para>TTD 限定: 評価前にシークする位置。ネイティブ `major:minor`、パス形式 `major_minor`、`start` / `end` エイリアスを受け付けます。Dump ドライブでは無視されます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="0" aliases="none">
+        <maml:name>ThreadId</maml:name>
+        <maml:description>
+          <maml:para>対象スレッドの ID。TTD では 16 進 OS ID (`0x` 付き・なし両方) を受け付け、`~~[0x&lt;tid&gt;]s` としてスレッド切替されます。Dump では OS ID のほか、`ClrMD.ManagedThreadId` を 10 進で渡すと自動的に OS ID に解決されます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:inputTypes>
+      <command:inputType>
+        <dev:type>
+          <dev:name>None</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>パイプライン入力はありません。パラメータはすべて名前付きまたは位置指定で渡します。</maml:para>
+        </maml:description>
+      </command:inputType>
+    </command:inputTypes>
+    <command:returnValues>
+      <command:returnValue>
+        <dev:type>
+          <dev:name>System.String</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>dbgeng がキャプチャした `dv /V /i /t` の出力テキスト (複数行を含む 1 つの文字列)。</maml:para>
+        </maml:description>
+      </command:returnValue>
+    </command:returnValues>
+    <maml:alertSet>
+      <maml:alert>
+        <maml:para>- Trace プロバイダのドライブでは使えません (dbgeng バックエンドを持たないため)。
+- locals/params 情報を持たない PDB (公開 Microsoft PDB など) に対してはほとんど何も出ません。これはデータ側の制約であり、ソースインデックス付き PDB やプライベートビルドが必要です。
+- マネージドフレームに対する `dv` は意味のある結果を返しません (dbgeng は JIT 出力しか見えないため)。マネージドローカルには `Invoke-CrashCommand '!clrstack -l'` 等の SOS 経由が現状の回避策です。
+- TTD で `-Position` を指定するとセッションのカレント位置が変わります。同じセッションで後続コマンドを実行する場合は影響が残る点に注意してください。</maml:para>
+      </maml:alert>
+    </maml:alertSet>
+    <command:examples>
+      <command:example>
+        <maml:title>--------- Example 1: Dump でスレッド 0 のトップフレームのローカルを取得 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS dmp:\&gt; Get-CrashLocalVariable 0x1a98 0
+```</maml:para>          <maml:para>OS スレッド ID `0x1a98` のフレーム 0 (最も内側) に対して `dv /V /i /t` を発行します。`-ThreadId` は 16 進文字列で `0x` 付き・なし両方受け付けます。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 2: マネージドスレッド ID で指定 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS dmp:\&gt; Get-CrashLocalVariable 20 2
+```</maml:para>          <maml:para>Dump ドライブではマネージドスレッド ID (ClrMD の `ManagedThreadId`) を渡すと、対応する OS ID へ自動解決されます。フレーム 2 を指定しているので、上から 3 段目のフレームが対象です。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 3: TTD で特定位置にシークして検査 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS ttd:\&gt; Get-CrashLocalVariable a098 0 -Position 1CBF_8C0
+```</maml:para>          <maml:para>TTD を `1CBF:8C0` にシークした状態で、スレッド `0xa098` のフレーム 0 のローカルを取得します。時間位置を跨ぐ比較は、同じ `-ThreadId`/`-Frame` に対して `-Position` を変えながら呼ぶのが基本パターンです。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 4: ドライブを明示的に指定 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS C:\&gt; Get-CrashLocalVariable -ThreadId 1a98 -Frame 0 -Drive dmp
+```</maml:para>          <maml:para>CrashDrive 外から呼ぶ場合は `-Drive` で対象ドライブを明示します。Dump / Ttd 以外のドライブではエラーになります。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 5: 複数フレームを横断的に比較 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS dmp:\&gt; 0..5 | % { "--- frame $_ ---"; Get-CrashLocalVariable 0x1a98 $_ }
+```</maml:para>          <maml:para>フレーム 0〜5 のローカルを順に取得し、コールスタックを跨いで変数がどう変化しているかを一度に眺めます。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+    </command:examples>
+    <command:relatedLinks>
+      <maml:navigationLink>
+        <maml:linkText>Read-CrashMemory</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Get-CrashObject</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Invoke-CrashCommand</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Enable-CrashEditorFollow</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+    </command:relatedLinks>
+  </command:command>
+  <command:command>
+    <command:details>
+      <command:name>Get-CrashObject</command:name>
+      <maml:description>
+        <maml:para>Dump ドライブの GC ヒープ上にあるマネージド (.NET) オブジェクトをアドレスから取得し、型名・サイズ・フィールド一覧を構造化して返します。</maml:para>
+      </maml:description>
+      <command:verb>Get</command:verb>
+      <command:noun>CrashObject</command:noun>
+    </command:details>
+    <maml:description>
+      <maml:para>`Get-CrashObject` は ClrMD の `ClrHeap.GetObject` を使ってアドレスを解釈し、`Address`、`TypeName`、`Size`、`MethodTable` と、型に応じた追加プロパティを持つ `PSObject` を返します。</maml:para>
+      <maml:para>- **文字列** (`System.String`): `Value` プロパティに最大 2048 文字ぶんの文字列内容。 - **配列**: `Length` / `ElementType` / `Preview` (先頭最大 16 要素)。 - **通常の参照型**: `Fields` プロパティに各インスタンスフィールドの `Name` / `TypeName` / `Value`。参照型フィールドは既定でアドレス文字列 (`0x&lt;hex&gt; &lt;TypeName&gt;`) として表示され、`-Expand` 指定時のみ 1 段深く展開されます。</maml:para>
+      <maml:para>ClrMD 依存のため **Dump ドライブ専用**です。TTD のオブジェクト検査は SOS のロードが必要で、配線はされていません (代わりに `Invoke-CrashCommand '!do &lt;addr&gt;'` で SOS を直接呼べます)。CLR が含まれていない dump (ネイティブのみ) ではエラーになります。</maml:para>
+      <maml:para>ヒープ上の参照をたどる基本パターンは「フィールド値に出ているアドレスを次の `Get-CrashObject` に渡す」です。パイプライン入力に対応しているので、アドレス文字列を `Select-Object -ExpandProperty` で抜いてそのまま渡せます。</maml:para>
+    </maml:description>
+    <command:syntax>
+      <command:syntaxItem>
+        <maml:name>Get-CrashObject</maml:name>
+        <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="0" aliases="none">
+          <maml:name>Address</maml:name>
+          <maml:description>
+            <maml:para>取得するマネージドオブジェクトのアドレス。`0x` プレフィックス付きの 16 進、プレフィックスなしの 10 進を受け付けます。WinDbg 風の桁区切り (`_` や `` ` ``) は除去されます。パイプライン入力に対応しています。</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>Drive</maml:name>
+          <maml:description>
+            <maml:para>対象ドライブ名。省略時はカレントロケーションのドライブが使われます。Dump 以外のドライブを指定するとエラーになります。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>Expand</maml:name>
+          <maml:description>
+            <maml:para>参照型フィールドを 1 段展開します。未指定時はアドレス文字列 (`0x&lt;hex&gt; &lt;TypeName&gt;`) として表示されます。さらに深く展開したい場合はアドレスを取り出して再帰的に呼んでください。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.Management.Automation.SwitchParameter</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="0" aliases="none">
+        <maml:name>Address</maml:name>
+        <maml:description>
+          <maml:para>取得するマネージドオブジェクトのアドレス。`0x` プレフィックス付きの 16 進、プレフィックスなしの 10 進を受け付けます。WinDbg 風の桁区切り (`_` や `` ` ``) は除去されます。パイプライン入力に対応しています。</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>Drive</maml:name>
+        <maml:description>
+          <maml:para>対象ドライブ名。省略時はカレントロケーションのドライブが使われます。Dump 以外のドライブを指定するとエラーになります。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>Expand</maml:name>
+        <maml:description>
+          <maml:para>参照型フィールドを 1 段展開します。未指定時はアドレス文字列 (`0x&lt;hex&gt; &lt;TypeName&gt;`) として表示されます。さらに深く展開したい場合はアドレスを取り出して再帰的に呼んでください。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.Management.Automation.SwitchParameter</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:inputTypes>
+      <command:inputType>
+        <dev:type>
+          <dev:name>System.String</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>`-Address` はパイプライン入力に対応しており、アドレス文字列を流し込んで一括検査できます。</maml:para>
+        </maml:description>
+      </command:inputType>
+    </command:inputTypes>
+    <command:returnValues>
+      <command:returnValue>
+        <dev:type>
+          <dev:name>System.Management.Automation.PSObject</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>`Address` / `TypeName` / `Size` / `MethodTable` と、型別の追加プロパティ (`Value` / `Length` / `ElementType` / `Preview` / `Fields`) を持つオブジェクト。</maml:para>
+        </maml:description>
+      </command:returnValue>
+    </command:returnValues>
+    <maml:alertSet>
+      <maml:alert>
+        <maml:para>- Dump ドライブ専用です。Ttd / Trace ドライブを指定するとエラーになります。
+- CLR が含まれない dump (ネイティブのみ) では `No CLR runtime in this dump` エラーになります。
+- 配列の `Preview` は最大 16 要素までに切り詰められます。全要素を見たい場合は `!da &lt;addr&gt;` (SOS) を `Invoke-CrashCommand` 経由で呼ぶのが早道です。
+- 参照型の深さは `-Expand` で 1 段のみ展開されます。再帰的な展開は呼び出し側で行ってください (無制限展開は循環参照で無限ループになるため意図的にしていません)。</maml:para>
+      </maml:alert>
+    </maml:alertSet>
+    <command:examples>
+      <command:example>
+        <maml:title>--------- Example 1: アドレスを指定してオブジェクトを取得 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS dmp:\&gt; Get-CrashObject 0x00000233A5B4C0E0
+```</maml:para>          <maml:para>指定アドレスのオブジェクトを取得し、`TypeName` / `Size` / `Fields` を持つ `PSObject` を返します。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 2: ヒープから特定型のインスタンスを拾って検査 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS dmp:\&gt; Get-ChildItem dmp:\heap | ? TypeName -Match 'MyApp\.Order$' |
+&gt;&gt;        Select-Object -First 1 -ExpandProperty SampleAddress |
+&gt;&gt;        Get-CrashObject
+```</maml:para>          <maml:para>`heap\` を走査して `MyApp.Order` 型の代表インスタンスを 1 つ取り出し、そのフィールドを表示します (`SampleAddress` は `heap\` のアイテムに付く代表アドレスです)。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 3: 参照フィールドを 1 段展開して表示 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS dmp:\&gt; Get-CrashObject 0x00000233A5B4C0E0 -Expand
+```</maml:para>          <maml:para>`-Expand` を付けると参照型フィールドがアドレス文字列ではなく、1 段展開された子 `PSObject` として表示されます。さらに深く辿りたい場合はアドレスを取り出して再帰的に `Get-CrashObject` を呼んでください。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 4: フィールドから別オブジェクトへ辿る ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS dmp:\&gt; $o = Get-CrashObject 0x00000233A5B4C0E0
+PS dmp:\&gt; $o.Fields | Format-Table Name, TypeName, Value
+PS dmp:\&gt; $next = ($o.Fields | ? Name -eq '_items').Value -replace ' .*',''
+PS dmp:\&gt; Get-CrashObject $next
+```</maml:para>          <maml:para>まず `Fields` を表形式で表示して目的の参照フィールド (`_items` など) のアドレス文字列を抜き、次の `Get-CrashObject` に渡して子オブジェクトを取得します。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 5: 文字列オブジェクトの値を直接取得 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS dmp:\&gt; (Get-CrashObject 0x00000233A5B4C500).Value
+```</maml:para>          <maml:para>対象が `System.String` の場合、`Value` プロパティに文字列内容がそのまま入っています。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+    </command:examples>
+    <command:relatedLinks>
+      <maml:navigationLink>
+        <maml:linkText>Read-CrashMemory</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Get-CrashLocalVariable</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Invoke-CrashCommand</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>New-CrashDrive</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+    </command:relatedLinks>
+  </command:command>
+  <command:command>
+    <command:details>
+      <command:name>Get-TtdBookmark</command:name>
+      <maml:description>
+        <maml:para>TTD ドライブに登録されているブックマークを列挙、もしくは名前で 1 件取得します。</maml:para>
+      </maml:description>
+      <command:verb>Get</command:verb>
+      <command:noun>TtdBookmark</command:noun>
+    </command:details>
+    <maml:description>
+      <maml:para>`Get-TtdBookmark` は TTD ドライブに紐付いたブックマーク辞書を参照するコマンドです。`-Name` 省略時は全ブックマークを名前順 (序数順) で列挙し、指定時はそのエントリだけを返します。</maml:para>
+      <maml:para>戻り値は `New-TtdBookmark` と同じ形の `PSObject` (`Name` / `Position` / `Drive`) で、Position は常に native 形式 (`major:minor`) に正規化されています。スクリプトから位置情報を取り出して `Invoke-CrashCommand -Position` などに流し込む用途に向きます。</maml:para>
+      <maml:para>存在しない名前を指定した場合は `ItemNotFoundException` が `WriteError` されます (パイプライン処理は継続)。</maml:para>
+    </maml:description>
+    <command:syntax>
+      <command:syntaxItem>
+        <maml:name>Get-TtdBookmark</maml:name>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>Drive</maml:name>
+          <maml:description>
+            <maml:para>対象ドライブ名。省略時はカレントロケーションのドライブが使われます。Ttd 以外のドライブを指定するとエラーになります。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="0" aliases="none">
+          <maml:name>Name</maml:name>
+          <maml:description>
+            <maml:para>取得するブックマーク名。省略時は全ブックマークを列挙します。存在しない名前を指定するとエラーになります。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>Drive</maml:name>
+        <maml:description>
+          <maml:para>対象ドライブ名。省略時はカレントロケーションのドライブが使われます。Ttd 以外のドライブを指定するとエラーになります。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="0" aliases="none">
+        <maml:name>Name</maml:name>
+        <maml:description>
+          <maml:para>取得するブックマーク名。省略時は全ブックマークを列挙します。存在しない名前を指定するとエラーになります。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:inputTypes>
+      <command:inputType>
+        <dev:type>
+          <dev:name>None</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>パイプライン入力はありません。</maml:para>
+        </maml:description>
+      </command:inputType>
+    </command:inputTypes>
+    <command:returnValues>
+      <command:returnValue>
+        <dev:type>
+          <dev:name>System.Management.Automation.PSObject</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>`Name` / `Position` (native 形式文字列) / `Drive` (ドライブ名) の 3 プロパティを持つオブジェクト。列挙時は複数、名前指定時は 0 または 1 件。</maml:para>
+        </maml:description>
+      </command:returnValue>
+    </command:returnValues>
+    <maml:alertSet>
+      <maml:alert>
+        <maml:para>- Ttd ドライブ専用です。Dump / Trace ドライブに対して呼ぶとエラーになります。
+- 列挙は名前の序数順 (`StringComparer.Ordinal`) です。大文字小文字は区別されます。
+- Position は常に native 形式 (`major:minor`) で返されます。path 形式に変換するには `.Replace(':','_')` を挟んでください。
+- `ttd:\bookmarks\` を `ls` した結果と対になる情報ですが、`Get-TtdBookmark` は生の辞書を返すので、スクリプトから扱う際はこちらの方がシンプルです。</maml:para>
+      </maml:alert>
+    </maml:alertSet>
+    <command:examples>
+      <command:example>
+        <maml:title>--------- Example 1: 全ブックマークを一覧 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS ttd:\&gt; Get-TtdBookmark
+```</maml:para>          <maml:para>登録されているすべてのブックマークを名前順に列挙します。未登録時は何も出力しません (エラーにはなりません)。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 2: 名前で 1 件取得 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS ttd:\&gt; Get-TtdBookmark crash-point
+```</maml:para>          <maml:para>`crash-point` という名前のブックマークのみ返します。存在しない場合は `BookmarkNotFound` エラーになります。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 3: Position を取り出して Invoke-CrashCommand に流す ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS ttd:\&gt; $bm = Get-TtdBookmark crash-point
+PS ttd:\&gt; Invoke-CrashCommand -Command 'k' -Position $bm.Position.Replace(':','_')
+```</maml:para>          <maml:para>ブックマークから native 形式の position を取り出し、path 形式に変換して `Invoke-CrashCommand` に渡します。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 4: ブックマーク付きの位置へまとめて cd ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS ttd:\&gt; Get-TtdBookmark | % { Write-Host $_.Name; cd "ttd:\bookmarks\$($_.Name)"; ls }
+```</maml:para>          <maml:para>すべてのブックマーク位置を順に訪問し、それぞれの場所でスタック/スレッドを眺めます。定点観測のような使い方に便利です。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 5: 特定ドライブのブックマークだけを見る ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS C:\&gt; Get-TtdBookmark -Drive ttd2
+```</maml:para>          <maml:para>複数 TTD ドライブをマウントしているとき、カレントロケーションに関係なく `ttd2` ドライブのブックマークだけを取得します。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+    </command:examples>
+    <command:relatedLinks>
+      <maml:navigationLink>
+        <maml:linkText>New-TtdBookmark</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Remove-TtdBookmark</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Invoke-CrashCommand</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+    </command:relatedLinks>
+  </command:command>
+  <command:command>
+    <command:details>
+      <command:name>Invoke-CrashCommand</command:name>
+      <maml:description>
+        <maml:para>Dump / Ttd ドライブの共有 dbgeng セッションに対して任意の dbgeng コマンドを実行し、出力テキストを返します。</maml:para>
+      </maml:description>
+      <command:verb>Invoke</command:verb>
+      <command:noun>CrashCommand</command:noun>
+    </command:details>
+    <maml:description>
+      <maml:para>`Invoke-CrashCommand` はプロバイダが内部で使っているのと同じ dbgeng セッション (`DbgEngSessionManager.AcquireFor` 経由) でコマンドを実行します。別エンジンインスタンスを起こさないので、ロードしたシンボルや解決済みモジュールはそのまま使われ、他ドライブとの奪い合いも起きません。</maml:para>
+      <maml:para>**「パス優先」の設計思想の逃げ道として使う**ことを想定したコマンドです。`threads\`、`frames\`、`heap\` などで表現できる操作はプロバイダ経由の方が一貫性があり、AI エージェントにも扱いやすくなります。`!locks`、`!syncblk`、独自の `.ecxr` ワークフローのようにパスで表現しづらい dbgeng 拡張を呼びたい時にだけ使用してください。繰り返し使うパターンが現れたら、パス化する合図です。</maml:para>
+      <maml:para>TTD ドライブでは `-Position` / `-ThreadId` により、コマンド実行前に位置/スレッドへ seek できます。Dump ドライブではこれらは無視され、警告のみ出力されます (スレッド切替が必要なら `~~[0x&lt;tid&gt;]s; cmd` のように先頭に付けてください)。</maml:para>
+    </maml:description>
+    <command:syntax>
+      <command:syntaxItem>
+        <maml:name>Invoke-CrashCommand</maml:name>
+        <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="0" aliases="none">
+          <maml:name>Command</maml:name>
+          <maml:description>
+            <maml:para>実行する dbgeng コマンド文字列。`!analyze -v`、`lm`、`k`、`dx @$cursession.TTD.Events.Count()` など WinDbg と同じ構文です。セミコロンで区切れば複数コマンドを 1 回の呼び出しで実行できます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>Drive</maml:name>
+          <maml:description>
+            <maml:para>対象ドライブ名。省略時はカレントロケーションのドライブが使われます。Dump / Ttd 以外のドライブを指定するとエラーになります。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>Position</maml:name>
+          <maml:description>
+            <maml:para>TTD 限定: コマンド実行前にシークする位置。ネイティブ形式 `major:minor`、パス形式 `major_minor`、もしくはエイリアス `start` / `end` を受け付けます。Dump ドライブでは無視され、警告が出力されます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>ThreadId</maml:name>
+          <maml:description>
+            <maml:para>TTD 限定: コマンド実行前に切り替えるスレッド ID。16 進、`0x` プレフィックスあり/なし両方受け付け、`~~[0x&lt;tid&gt;]s` として発行されます。Dump ドライブでは無視され、警告が出力されます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="0" aliases="none">
+        <maml:name>Command</maml:name>
+        <maml:description>
+          <maml:para>実行する dbgeng コマンド文字列。`!analyze -v`、`lm`、`k`、`dx @$cursession.TTD.Events.Count()` など WinDbg と同じ構文です。セミコロンで区切れば複数コマンドを 1 回の呼び出しで実行できます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>Drive</maml:name>
+        <maml:description>
+          <maml:para>対象ドライブ名。省略時はカレントロケーションのドライブが使われます。Dump / Ttd 以外のドライブを指定するとエラーになります。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>Position</maml:name>
+        <maml:description>
+          <maml:para>TTD 限定: コマンド実行前にシークする位置。ネイティブ形式 `major:minor`、パス形式 `major_minor`、もしくはエイリアス `start` / `end` を受け付けます。Dump ドライブでは無視され、警告が出力されます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>ThreadId</maml:name>
+        <maml:description>
+          <maml:para>TTD 限定: コマンド実行前に切り替えるスレッド ID。16 進、`0x` プレフィックスあり/なし両方受け付け、`~~[0x&lt;tid&gt;]s` として発行されます。Dump ドライブでは無視され、警告が出力されます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:inputTypes>
+      <command:inputType>
+        <dev:type>
+          <dev:name>System.String</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>`-Command` はパイプライン入力に対応しています。複数のコマンド文字列を順次実行できます。</maml:para>
+        </maml:description>
+      </command:inputType>
+    </command:inputTypes>
+    <command:returnValues>
+      <command:returnValue>
+        <dev:type>
+          <dev:name>System.String</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>dbgeng がキャプチャした出力テキストがそのまま 1 つの文字列として返ります (複数行を含む改行付きテキスト)。</maml:para>
+        </maml:description>
+      </command:returnValue>
+    </command:returnValues>
+    <maml:alertSet>
+      <maml:alert>
+        <maml:para>- Trace プロバイダのドライブでは使えません (dbgeng バックエンドを持たないため)。
+- コマンドは共有セッションで実行されるので、`.reload` や `.sympath` のような副作用のあるコマンドは後続の操作にも影響します。
+- Dump ドライブに `-Position` / `-ThreadId` を渡すと警告のみでコマンドは実行されます。スレッド切替が必要な場合は `Invoke-CrashCommand '~~[0x&lt;tid&gt;]s; k'` のように先頭で切り替えてください。
+- 出力は文字列 1 個です。行ごとに処理したい場合は `-split "`r?`n"` 等で分割してください。</maml:para>
+      </maml:alert>
+    </maml:alertSet>
+    <command:examples>
+      <command:example>
+        <maml:title>--------- Example 1: 例外解析を実行 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS dmp:\&gt; Invoke-CrashCommand '!analyze -v'
+```</maml:para>          <maml:para>Dump ドライブで `!analyze -v` を流して詳細な例外解析テキストを取得します。`dmp:\analyze.txt` にも同内容がキャッシュされていますが、こちらはシンボル状態を変えた後にフレッシュに実行したい場合に使えます。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 2: ロードモジュール一覧 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS dmp:\&gt; Invoke-CrashCommand lm
+```</maml:para>          <maml:para>`lm` でロード済みモジュール一覧を取得します。整形済みテキストがそのまま返ります。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 3: TTD で特定位置にシークしてから実行 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS ttd:\&gt; Invoke-CrashCommand -Command 'k' -Position 1CBF_8C0
+```</maml:para>          <maml:para>TTD を `1CBF:8C0` にシークした状態でスタックトレース (`k`) を取得します。`-Position` は内部で `1CBF:8C0` (コロン区切り) に変換されてから `!tt` されます。`start` / `end` エイリアスも使えます。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 4: TTD でスレッド切替 + データモデル呼び出し ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS ttd:\&gt; Invoke-CrashCommand -Command 'dx @$cursession.TTD.Events.Count()' -ThreadId a098
+```</maml:para>          <maml:para>16 進のスレッド ID を指定して `~~[0xa098]s` 相当のスレッド切替をしたうえで、TTD データモデル経由で総イベント数を取得します。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 5: パイプラインで複数コマンドを連続実行 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS dmp:\&gt; '!threads', '!clrstack', '!dso' | Invoke-CrashCommand
+```</maml:para>          <maml:para>SOS 系コマンドをパイプで順次流し、出力テキストをまとめて受け取ります。いずれも同じセッションで実行されるので、シンボルロードのコストは初回のみです。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+    </command:examples>
+    <command:relatedLinks>
+      <maml:navigationLink>
+        <maml:linkText>Read-CrashMemory</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Get-CrashLocalVariable</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Get-CrashObject</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>New-CrashDrive</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+    </command:relatedLinks>
+  </command:command>
+  <command:command>
+    <command:details>
+      <command:name>New-CrashDrive</command:name>
+      <maml:description>
+        <maml:para>ポストモーテム成果物 (dump / TTD / トレース) を PSDrive としてマウント、またはプログラムをトレーサー配下で実行して取得したトレースをマウントします。</maml:para>
+      </maml:description>
+      <command:verb>New</command:verb>
+      <command:noun>CrashDrive</command:noun>
+    </command:details>
+    <maml:description>
+      <maml:para>`New-CrashDrive` は CrashDrive 唯一のマウントコマンドで、二つのパラメータセットを持ちます。</maml:para>
+      <maml:para>**FromFile モード (既定)** は既存の成果物をマウントします。`-Path` に渡されたファイルの拡張子から自動判別され、`.dmp` → Dump、`.run` → Ttd、`.jsonl` → Trace のプロバイダが選ばれます。マウント後は `cd &lt;name&gt;:\` で内部ツリーをブラウズできます。</maml:para>
+      <maml:para>**Capture モード** は `-ExecutablePath` で指定したプログラムを言語ネイティブのトレーサー配下で起動し、出力された JSONL トレースをそのままマウントします。`-Language` は拡張子から自動推定され (`.py` / `.pyw` → python、`.exe` / `.dll` → dotnet)、必要に応じて明示指定もできます。</maml:para>
+      <maml:para>`-Path` と `-ExecutablePath` はあえて対称ではなく、「既存の成果物を読む」のか「プロセスを起動する」のかが呼び出し側で一目で分かるように設計されています。</maml:para>
+      <maml:para>`-SymbolPath` は Dump / Ttd のシンボルパスを上書きします。既定は `srv*%LOCALAPPDATA%\dbg\sym` (ローカルキャッシュのみ) で、Microsoft シンボルサーバーから公開 PDB を取得する場合は明示的に `srv*cache*https://msdl.microsoft.com/download/symbols` を渡します。</maml:para>
+    </maml:description>
+    <command:syntax>
+      <command:syntaxItem>
+        <maml:name>New-CrashDrive</maml:name>
+        <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="0" aliases="none">
+          <maml:name>Name</maml:name>
+          <maml:description>
+            <maml:para>マウント先 PSDrive の名前 (例: `dmp`、`ttd`、`app`)。`cd &lt;Name&gt;:\` でアクセスします。</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>PassThru</maml:name>
+          <maml:description>
+            <maml:para>指定時はマウントした `PSDriveInfo` をパイプラインに返します。既定ではドライブだけ作られ、出力はありません。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.Management.Automation.SwitchParameter</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="1" aliases="none">
+          <maml:name>Path</maml:name>
+          <maml:description>
+            <maml:para>FromFile モード: マウントする既存成果物のパス。`.dmp` (Dump)、`.run` (Ttd)、`.jsonl` (Trace) のいずれか。拡張子でプロバイダが自動決定されます。エイリアス `-File` も使えます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>SymbolPath</maml:name>
+          <maml:description>
+            <maml:para>FromFile モード: dbgeng の `.sympath` を上書きします。既定は `srv*%LOCALAPPDATA%\dbg\sym` (ローカルキャッシュのみ)。リモート取得したい場合は `srv*cache*https://msdl.microsoft.com/download/symbols` のように指定します。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+      <command:syntaxItem>
+        <maml:name>New-CrashDrive</maml:name>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>EventTypes</maml:name>
+          <maml:description>
+            <maml:para>Python トレーサー限定: 記録するイベント種別。`call` / `return` / `exception` から複数選択可能。既定はすべて (`call,return,exception`)。`-Language dotnet` では無視されます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>Exclude</maml:name>
+          <maml:description>
+            <maml:para>.NET トレーサー限定: パッチ対象から除外するアセンブリ名の glob パターン。`-Include` と併用可能。既定フィルタから更に絞り込みたい場合に使用します。`-Language python` では無視されます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>ExecutableArgs</maml:name>
+          <maml:description>
+            <maml:para>ターゲットプログラムへ渡すコマンドライン引数。残余引数として受け取るので、`-ExecutableArgs @('--flag','value')` のほか、末尾に素で並べる書き方も可能です。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>ExecutablePath</maml:name>
+          <maml:description>
+            <maml:para>トレーサー配下で実行するプログラムのパス。`.py` / `.pyw` / `.exe` / `.dll` を受け付けます。あえて名前付きのみ (非 positional) とし、既存成果物をマウントする `-Path` と取り違えないようにしています。</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>Include</maml:name>
+          <maml:description>
+            <maml:para>.NET トレーサー限定: パッチ対象アセンブリ名の glob パターン (例: `'MyApp*'`)。指定時は既定の user-authored フィルタを上書きし、一致するアセンブリのみが Harmony でパッチされます。`-Language python` では無視されます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>IncludeGlobals</maml:name>
+          <maml:description>
+            <maml:para>Python トレーサー限定: グローバル変数のスナップショットもトレースに含めます。`-Language dotnet` では無視されます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.Management.Automation.SwitchParameter</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>Language</maml:name>
+          <maml:description>
+            <maml:para>トレーサー言語。`python` または `dotnet`。省略時は `-ExecutablePath` の拡張子から自動推定されます (`.py`/`.pyw` → `python`、`.exe`/`.dll` → `dotnet`)。拡張子が非標準の場合のみ明示指定が必要です。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="0" aliases="none">
+          <maml:name>Name</maml:name>
+          <maml:description>
+            <maml:para>マウント先 PSDrive の名前 (例: `dmp`、`ttd`、`app`)。`cd &lt;Name&gt;:\` でアクセスします。</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>OutputFile</maml:name>
+          <maml:description>
+            <maml:para>Capture モード限定: トレース JSONL の出力先パス。省略時は `%TEMP%\crashdrive_trace_&lt;timestamp&gt;_&lt;guid&gt;.jsonl` に書き出されます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>PassThru</maml:name>
+          <maml:description>
+            <maml:para>指定時はマウントした `PSDriveInfo` をパイプラインに返します。既定ではドライブだけ作られ、出力はありません。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.Management.Automation.SwitchParameter</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>TimeoutSeconds</maml:name>
+          <maml:description>
+            <maml:para>Capture モード限定: ターゲットプロセスの実行タイムアウト (秒)。範囲は 1 ～ 3600、既定 60 秒。超過時はプロセスツリーを kill し、その時点までの部分トレースを残したうえで `TimeoutException` を投げます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.Int32</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>Watch</maml:name>
+          <maml:description>
+            <maml:para>Python トレーサー限定: 値の変化を追跡する変数名のリスト (カンマ区切りで渡す配列)。指定した名前が `call` / `return` イベントのたびに評価されます。`-Language dotnet` では無視されます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String[]</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>EventTypes</maml:name>
+        <maml:description>
+          <maml:para>Python トレーサー限定: 記録するイベント種別。`call` / `return` / `exception` から複数選択可能。既定はすべて (`call,return,exception`)。`-Language dotnet` では無視されます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>Exclude</maml:name>
+        <maml:description>
+          <maml:para>.NET トレーサー限定: パッチ対象から除外するアセンブリ名の glob パターン。`-Include` と併用可能。既定フィルタから更に絞り込みたい場合に使用します。`-Language python` では無視されます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>ExecutableArgs</maml:name>
+        <maml:description>
+          <maml:para>ターゲットプログラムへ渡すコマンドライン引数。残余引数として受け取るので、`-ExecutableArgs @('--flag','value')` のほか、末尾に素で並べる書き方も可能です。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>ExecutablePath</maml:name>
+        <maml:description>
+          <maml:para>トレーサー配下で実行するプログラムのパス。`.py` / `.pyw` / `.exe` / `.dll` を受け付けます。あえて名前付きのみ (非 positional) とし、既存成果物をマウントする `-Path` と取り違えないようにしています。</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>Include</maml:name>
+        <maml:description>
+          <maml:para>.NET トレーサー限定: パッチ対象アセンブリ名の glob パターン (例: `'MyApp*'`)。指定時は既定の user-authored フィルタを上書きし、一致するアセンブリのみが Harmony でパッチされます。`-Language python` では無視されます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>IncludeGlobals</maml:name>
+        <maml:description>
+          <maml:para>Python トレーサー限定: グローバル変数のスナップショットもトレースに含めます。`-Language dotnet` では無視されます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.Management.Automation.SwitchParameter</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>Language</maml:name>
+        <maml:description>
+          <maml:para>トレーサー言語。`python` または `dotnet`。省略時は `-ExecutablePath` の拡張子から自動推定されます (`.py`/`.pyw` → `python`、`.exe`/`.dll` → `dotnet`)。拡張子が非標準の場合のみ明示指定が必要です。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="0" aliases="none">
+        <maml:name>Name</maml:name>
+        <maml:description>
+          <maml:para>マウント先 PSDrive の名前 (例: `dmp`、`ttd`、`app`)。`cd &lt;Name&gt;:\` でアクセスします。</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>OutputFile</maml:name>
+        <maml:description>
+          <maml:para>Capture モード限定: トレース JSONL の出力先パス。省略時は `%TEMP%\crashdrive_trace_&lt;timestamp&gt;_&lt;guid&gt;.jsonl` に書き出されます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>PassThru</maml:name>
+        <maml:description>
+          <maml:para>指定時はマウントした `PSDriveInfo` をパイプラインに返します。既定ではドライブだけ作られ、出力はありません。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.Management.Automation.SwitchParameter</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="1" aliases="none">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>FromFile モード: マウントする既存成果物のパス。`.dmp` (Dump)、`.run` (Ttd)、`.jsonl` (Trace) のいずれか。拡張子でプロバイダが自動決定されます。エイリアス `-File` も使えます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>SymbolPath</maml:name>
+        <maml:description>
+          <maml:para>FromFile モード: dbgeng の `.sympath` を上書きします。既定は `srv*%LOCALAPPDATA%\dbg\sym` (ローカルキャッシュのみ)。リモート取得したい場合は `srv*cache*https://msdl.microsoft.com/download/symbols` のように指定します。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>TimeoutSeconds</maml:name>
+        <maml:description>
+          <maml:para>Capture モード限定: ターゲットプロセスの実行タイムアウト (秒)。範囲は 1 ～ 3600、既定 60 秒。超過時はプロセスツリーを kill し、その時点までの部分トレースを残したうえで `TimeoutException` を投げます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>Watch</maml:name>
+        <maml:description>
+          <maml:para>Python トレーサー限定: 値の変化を追跡する変数名のリスト (カンマ区切りで渡す配列)。指定した名前が `call` / `return` イベントのたびに評価されます。`-Language dotnet` では無視されます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String[]</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:inputTypes>
+      <command:inputType>
+        <dev:type>
+          <dev:name>None</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>パイプライン入力はありません。パラメータはすべて名前付きまたは位置指定で渡します。</maml:para>
+        </maml:description>
+      </command:inputType>
+    </command:inputTypes>
+    <command:returnValues>
+      <command:returnValue>
+        <dev:type>
+          <dev:name>None</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>既定では何も出力しません。`-PassThru` 指定時のみ `System.Management.Automation.PSDriveInfo` を返します。</maml:para>
+        </maml:description>
+      </command:returnValue>
+    </command:returnValues>
+    <maml:alertSet>
+      <maml:alert>
+        <maml:para>- TTD (`.run`) のマウントには WinDbg Preview (Microsoft Store 版) が必要です。System32 の dbgeng では `.run` を開けません。
+- Python トレース取得には Python 3.12+、.NET トレース取得には .NET 6+ のターゲットが必要です (`DOTNET_STARTUP_HOOKS` の都合)。
+- Capture モードで生成された JSONL は既定で `%TEMP%` に残ります。後から再マウントしたい場合は `-OutputFile` で保存先を指定してください。
+- ソース行の解決は Dump の場合 `DumpType.Full` が必要です。Normal dump ではメソッド名までは取れても ILOffsetMap が空で行が取れない、という挙動になります (データの制約であり、回避策はありません)。</maml:para>
+      </maml:alert>
+    </maml:alertSet>
+    <command:examples>
+      <command:example>
+        <maml:title>--------- Example 1: 既存のクラッシュダンプをマウント ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS C:\&gt; New-CrashDrive dmp .\crash.dmp
+PS C:\&gt; cd dmp:\
+PS dmp:\&gt; ls
+```</maml:para>          <maml:para>`.dmp` を Dump プロバイダでマウントし、`threads\`、`modules\`、`heap\` などを持つ仮想ファイルシステムとして公開します。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 2: TTD レコーディングをマウント ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS C:\&gt; New-CrashDrive ttd .\recording.run
+PS C:\&gt; cd ttd:\calls\python313\PyObject_IsTrue
+PS ttd:\calls\python313\PyObject_IsTrue\&gt; ls
+```</maml:para>          <maml:para>`.run` を Ttd プロバイダでマウントすると `calls\&lt;module&gt;\&lt;fn&gt;\` の下に対象関数の全呼び出しが並び、1 つずつ `cd` で開けばその位置の呼び出しスタック・引数が見られます。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 3: Python トレーサーで新規キャプチャ + マウント ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS C:\&gt; New-CrashDrive app -ExecutablePath .\sample_target.py -IncludeGlobals
+PS C:\&gt; cd app:\by-function
+```</maml:para>          <maml:para>`sample_target.py` を Python `sys.monitoring` トレーサー配下で実行し、生成された JSONL をそのまま Trace プロバイダでマウントします。`-IncludeGlobals` でグローバル変数のスナップショットも記録されます。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 4: .NET プログラムをトレース (Harmony) ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS C:\&gt; New-CrashDrive app -ExecutablePath .\MyApp.exe `
+&gt;&gt;       -Include 'MyApp*' `
+&gt;&gt;       -ExecutableArgs @('--flag', 'value')
+```</maml:para>          <maml:para>`MyApp.exe` を `DOTNET_STARTUP_HOOKS` 経由の Harmony トレーサー配下で実行し、`MyApp*` に一致するアセンブリのみをパッチ対象にします。`--flag value` はターゲットプログラムへの引数として渡されます。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 5: シンボルサーバーを指定してマウント ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS C:\&gt; New-CrashDrive dmp .\pwsh.dmp -SymbolPath 'srv*cache*https://msdl.microsoft.com/download/symbols'
+```</maml:para>          <maml:para>リモートシンボルサーバーから PDB を取得しながらマウントします。既定ではローカルキャッシュのみで、既にダウンロード済みの PDB だけが解決されます。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 6: PassThru で PSDriveInfo を受け取る ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS C:\&gt; $d = New-CrashDrive dmp .\crash.dmp -PassThru
+PS C:\&gt; $d | Format-List Name, Provider, Root
+```</maml:para>          <maml:para>`-PassThru` をつけるとマウントされたドライブの `PSDriveInfo` がパイプラインに流れます。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+    </command:examples>
+    <command:relatedLinks>
+      <maml:navigationLink>
+        <maml:linkText>Invoke-CrashCommand</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Read-CrashMemory</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Get-CrashObject</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Get-CrashLocalVariable</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Enable-CrashEditorFollow</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>New-TtdBookmark</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+    </command:relatedLinks>
+  </command:command>
+  <command:command>
+    <command:details>
+      <command:name>New-TtdBookmark</command:name>
+      <maml:description>
+        <maml:para>TTD ドライブ上の特定位置に覚えやすい名前を付け、`ttd:\bookmarks\&lt;name&gt;\` としてアクセス可能にします。</maml:para>
+      </maml:description>
+      <command:verb>New</command:verb>
+      <command:noun>TtdBookmark</command:noun>
+    </command:details>
+    <maml:description>
+      <maml:para>`New-TtdBookmark` は TTD の時間位置に別名を付けるコマンドです。登録したブックマークは `ttd:\bookmarks\&lt;Name&gt;\` として露出し、内部的には `ttd:\positions\&lt;encoded&gt;\` と同じレイアウト (`position.json`、`threads\&lt;id&gt;\frames\&lt;n&gt;\` など) を持ちます。</maml:para>
+      <maml:para>同じ TTD レコーディングを繰り返し調べるときに、`1CBF:8C0` のような native 位置文字列を何度も打ち込む代わりに `ttd:\bookmarks\crash-point\` のような安定した名前で参照できます。</maml:para>
+      <maml:para>ブックマークは **セッションローカル** で、`TtdDriveInfo` (PSDrive のサブクラス) 上の辞書に保持されます。`Remove-PSDrive` や pwsh 終了で消えます。永続化が必要な場合はスクリプト/プロファイルで起動時に `New-TtdBookmark` を呼び直す構成にしてください。</maml:para>
+      <maml:para>`-Name` はパス区切り (`/`、`\`、`:`) を含めず、かつ空でないことが求められます。既存の同名ブックマークは上書きされます (エラーにはなりません)。</maml:para>
+    </maml:description>
+    <command:syntax>
+      <command:syntaxItem>
+        <maml:name>New-TtdBookmark</maml:name>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>Drive</maml:name>
+          <maml:description>
+            <maml:para>対象ドライブ名。省略時はカレントロケーションのドライブが使われます。Ttd 以外のドライブを指定するとエラーになります。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="0" aliases="none">
+          <maml:name>Name</maml:name>
+          <maml:description>
+            <maml:para>ブックマーク名。空文字不可、`/`、`\`、`:` を含めることはできません。既存の同名ブックマークは上書きされます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="1" aliases="none">
+          <maml:name>Position</maml:name>
+          <maml:description>
+            <maml:para>ブックマークする時間位置。ネイティブ形式 `major:minor`、パス形式 `major_minor`、もしくはエイリアス `start` / `end` を受け付けます。エイリアスは Lifetime 開始/終了の native 位置に解決されます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>Drive</maml:name>
+        <maml:description>
+          <maml:para>対象ドライブ名。省略時はカレントロケーションのドライブが使われます。Ttd 以外のドライブを指定するとエラーになります。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="0" aliases="none">
+        <maml:name>Name</maml:name>
+        <maml:description>
+          <maml:para>ブックマーク名。空文字不可、`/`、`\`、`:` を含めることはできません。既存の同名ブックマークは上書きされます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="1" aliases="none">
+        <maml:name>Position</maml:name>
+        <maml:description>
+          <maml:para>ブックマークする時間位置。ネイティブ形式 `major:minor`、パス形式 `major_minor`、もしくはエイリアス `start` / `end` を受け付けます。エイリアスは Lifetime 開始/終了の native 位置に解決されます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:inputTypes>
+      <command:inputType>
+        <dev:type>
+          <dev:name>None</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>パイプライン入力はありません。</maml:para>
+        </maml:description>
+      </command:inputType>
+    </command:inputTypes>
+    <command:returnValues>
+      <command:returnValue>
+        <dev:type>
+          <dev:name>System.Management.Automation.PSObject</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>`Name` / `Position` (native 形式文字列) / `Drive` (ドライブ名) の 3 プロパティを持つオブジェクト。</maml:para>
+        </maml:description>
+      </command:returnValue>
+    </command:returnValues>
+    <maml:alertSet>
+      <maml:alert>
+        <maml:para>- ブックマークはセッションローカルで、ドライブが `Remove-PSDrive` されるか pwsh が終了すると失われます。永続化にはプロファイルスクリプトで再登録してください。
+- Ttd ドライブ専用です。Dump / Trace ドライブに対して呼ぶとエラーになります。
+- 同名の上書きは許容されます (エラーなし)。確実に作り直したい場合は先に `Remove-TtdBookmark` を呼ぶ必要はありません。
+- `ttd:\bookmarks\&lt;name&gt;\` と `ttd:\positions\&lt;encoded&gt;\` は中身のレイアウトが揃えてあり、パス指向の操作がそのまま使えます。</maml:para>
+      </maml:alert>
+    </maml:alertSet>
+    <command:examples>
+      <command:example>
+        <maml:title>--------- Example 1: 例外発生位置にブックマークを付ける ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS ttd:\&gt; New-TtdBookmark crash-point 1CBF:8C0
+```</maml:para>          <maml:para>`1CBF:8C0` に `crash-point` という名前を付けます。以降 `cd ttd:\bookmarks\crash-point\` でこの位置に戻れます。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 2: path 形式の position からブックマーク ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS ttd:\positions\1CBF_8C0\&gt; New-TtdBookmark crash-point 1CBF_8C0
+```</maml:para>          <maml:para>path 形式 (`_` 区切り) も受け付けられ、内部的には native 形式 (`:` 区切り) に正規化されます。`ttd:\positions\` を歩いて見つけた位置をそのままブックマークする定番パターンです。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 3: Lifetime 端を名前付けする ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS ttd:\&gt; New-TtdBookmark prog-start start
+PS ttd:\&gt; New-TtdBookmark prog-end   end
+```</maml:para>          <maml:para>`start` / `end` エイリアスは自動的に Lifetime の開始/終了の native 位置に解決されます。プログラム全体を走査する起点・終点を一度決めておく、というワークフローに使えます。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 4: ドライブを明示指定 (複数 TTD 比較) ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS C:\&gt; New-TtdBookmark -Name crash-point -Position 1CBF:8C0 -Drive ttd1
+PS C:\&gt; New-TtdBookmark -Name crash-point -Position 2A5F:100 -Drive ttd2
+```</maml:para>          <maml:para>複数の TTD ドライブをマウントしている場合、同じ名前のブックマークをドライブ別に付けて、`cd ttd1:\bookmarks\crash-point` と `cd ttd2:\bookmarks\crash-point` で対照比較ができます。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 5: パイプラインで結果を確認 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS ttd:\&gt; New-TtdBookmark crash-point 1CBF:8C0 | Format-List
+```</maml:para>          <maml:para>返値は `Name` / `Position` / `Drive` プロパティを持つ `PSObject` です。Position は常に native 形式に正規化されているので、スクリプトから参照する場合はこちらが安定しています。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+    </command:examples>
+    <command:relatedLinks>
+      <maml:navigationLink>
+        <maml:linkText>Get-TtdBookmark</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Remove-TtdBookmark</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Invoke-CrashCommand</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>New-CrashDrive</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+    </command:relatedLinks>
+  </command:command>
+  <command:command>
+    <command:details>
+      <command:name>Read-CrashMemory</command:name>
+      <maml:description>
+        <maml:para>Dump / Ttd ドライブのメモリアドレスを読み取り、Hex / ASCII / Unicode / DWORD / QWORD / ポインタチェーン形式で返します。</maml:para>
+      </maml:description>
+      <command:verb>Read</command:verb>
+      <command:noun>CrashMemory</command:noun>
+    </command:details>
+    <maml:description>
+      <maml:para>`Read-CrashMemory` はドライブの共有 dbgeng セッション (`ExecuteDbgCommand` 経由) で `db` / `da` / `du` / `dd` / `dq` / `dps` を発行し、出力テキストをそのまま返します。プロバイダと同じセッションを使うのでシンボル状態は共有され、エンジンの多重起動も起きません。</maml:para>
+      <maml:para>Dump ドライブでは単純にアドレスを読みます。Ttd ドライブでは `-Position` で時間位置を指定でき、省略時はセッションが最後に seek された位置 (通常は Lifetime end) がそのまま使われます。</maml:para>
+      <maml:para>パス指向の代替として `ttd:\memory\&lt;start&gt;_&lt;end&gt;\` のツリーも存在し、範囲内の読み書きアクセスや先頭書き込み位置などを構造化して見られます。アドホックに任意アドレスを読みたい、あるいは別フォーマットで見たいときに本 cmdlet を使い、「どこで誰がこのメモリを触ったか」を辿る用途ではパスを使うのが自然です。</maml:para>
+      <maml:para>Trace ドライブでは dbgeng バックエンドを持たないため使えません (エラー)。</maml:para>
+    </maml:description>
+    <command:syntax>
+      <command:syntaxItem>
+        <maml:name>Read-CrashMemory</maml:name>
+        <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="0" aliases="none">
+          <maml:name>Address</maml:name>
+          <maml:description>
+            <maml:para>読み取るメモリアドレス。`0x` プレフィックス付きの 16 進、プレフィックスなしの 10 進を受け付けます。WinDbg 風の桁区切り (`_` や `` ` ``) は除去されます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>Drive</maml:name>
+          <maml:description>
+            <maml:para>対象ドライブ名。省略時はカレントロケーションのドライブが使われます。Dump / Ttd 以外のドライブを指定するとエラーになります。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>Format</maml:name>
+          <maml:description>
+            <maml:para>出力フォーマット。`Hex` (`db`) / `Ascii` (`da`) / `Unicode` (`du`) / `Dword` (`dd`) / `Qword` (`dq`) / `Pointers` (`dps`)。既定は `Hex`。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>Length</maml:name>
+          <maml:description>
+            <maml:para>読み取り要素数 (バイト単位で `db` / `da`、ワイド文字単位で `du`、DWORD/QWORD/ポインタ単位でそれぞれ)。既定 128。dbgeng の `L0n&lt;decimal&gt;` に変換されます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.Int32</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>Position</maml:name>
+          <maml:description>
+            <maml:para>TTD 限定: 読み取り前にシークする位置。ネイティブ `major:minor`、パス形式 `major_minor`、`start` / `end` エイリアスを受け付けます。Dump ドライブでは無視されます。省略時は直近に seek された位置 (通常は Lifetime end) のままで読みます。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="0" aliases="none">
+        <maml:name>Address</maml:name>
+        <maml:description>
+          <maml:para>読み取るメモリアドレス。`0x` プレフィックス付きの 16 進、プレフィックスなしの 10 進を受け付けます。WinDbg 風の桁区切り (`_` や `` ` ``) は除去されます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>Drive</maml:name>
+        <maml:description>
+          <maml:para>対象ドライブ名。省略時はカレントロケーションのドライブが使われます。Dump / Ttd 以外のドライブを指定するとエラーになります。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>Format</maml:name>
+        <maml:description>
+          <maml:para>出力フォーマット。`Hex` (`db`) / `Ascii` (`da`) / `Unicode` (`du`) / `Dword` (`dd`) / `Qword` (`dq`) / `Pointers` (`dps`)。既定は `Hex`。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>Length</maml:name>
+        <maml:description>
+          <maml:para>読み取り要素数 (バイト単位で `db` / `da`、ワイド文字単位で `du`、DWORD/QWORD/ポインタ単位でそれぞれ)。既定 128。dbgeng の `L0n&lt;decimal&gt;` に変換されます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>Position</maml:name>
+        <maml:description>
+          <maml:para>TTD 限定: 読み取り前にシークする位置。ネイティブ `major:minor`、パス形式 `major_minor`、`start` / `end` エイリアスを受け付けます。Dump ドライブでは無視されます。省略時は直近に seek された位置 (通常は Lifetime end) のままで読みます。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:inputTypes>
+      <command:inputType>
+        <dev:type>
+          <dev:name>None</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>パイプライン入力はありません。パラメータはすべて名前付きまたは位置指定で渡します。</maml:para>
+        </maml:description>
+      </command:inputType>
+    </command:inputTypes>
+    <command:returnValues>
+      <command:returnValue>
+        <dev:type>
+          <dev:name>System.String</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>dbgeng がキャプチャした整形済み出力テキスト (複数行を含む 1 つの文字列)。</maml:para>
+        </maml:description>
+      </command:returnValue>
+    </command:returnValues>
+    <maml:alertSet>
+      <maml:alert>
+        <maml:para>- Trace プロバイダのドライブでは使えません (dbgeng バックエンドを持たないため)。
+- 読み取りは共有セッションで行われ、`-Position` 指定時は TTD のカレント位置を変更します。続けて `Invoke-CrashCommand` で別コマンドを流すと影響が残る点に注意してください。
+- 範囲内の読み書きアクセスや「最後にこのアドレスに書いたのは誰か」を辿るなら、path 側の `ttd:\memory\&lt;start&gt;_&lt;end&gt;\` ツリーの方が構造化されていて便利です。
+- 出力は文字列 1 個です。行ごとに処理したい場合は `-split "`r?`n"` 等で分割してください。</maml:para>
+      </maml:alert>
+    </maml:alertSet>
+    <command:examples>
+      <command:example>
+        <maml:title>--------- Example 1: Dump ドライブで既定の Hex ダンプ ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS dmp:\&gt; Read-CrashMemory 0x7ffb12340000
+```</maml:para>          <maml:para>`0x7ffb12340000` から 128 バイトを `db` で読み、バイト列と ASCII 表現が付いた整形済みテキストを返します。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 2: Unicode 文字列として読み取り ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS dmp:\&gt; Read-CrashMemory 0x00000233A5B4C0E0 -Format Unicode -Length 64
+```</maml:para>          <maml:para>`du` で 64 ワイド文字ぶん読み取ります。`-Length` は `db` / `da` などと同じ意味で、「何バイト / 何要素まで読むか」を指定します (既定 128)。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 3: TTD の特定位置でポインタチェーンを展開 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS ttd:\&gt; Read-CrashMemory 0x7ff7ab12c080 -Position 1CBF_8C0 -Format Pointers -Length 8
+```</maml:para>          <maml:para>TTD を `1CBF:8C0` にシークしてから `dps` で 8 ワード読み、各ワードに対応するシンボル付きアドレスを返します。`-Position` は path 形式 (`1CBF_8C0`) / native 形式 (`1CBF:8C0`) / `start` / `end` エイリアスを受け付けます。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 4: QWORD 並びとして読み取り ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS dmp:\&gt; Read-CrashMemory 0x00007ffd_12345000 -Format Qword -Length 32
+```</maml:para>          <maml:para>`dq` で 32 QWORD を読み取ります。アドレスの `_` と `` ` `` は区切り文字として除去されるので、WinDbg の表記をそのまま貼り付けられます。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 5: ドライブを明示的に指定 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS C:\&gt; Read-CrashMemory 0x7ffb12340000 -Drive dmp -Format Ascii
+```</maml:para>          <maml:para>カレントロケーションが CrashDrive 外にあっても、`-Drive` で対象ドライブを指定して読めます。Dump / Ttd 以外のドライブを指すとエラーになります。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+    </command:examples>
+    <command:relatedLinks>
+      <maml:navigationLink>
+        <maml:linkText>Invoke-CrashCommand</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Get-CrashObject</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Get-CrashLocalVariable</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>New-CrashDrive</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+    </command:relatedLinks>
+  </command:command>
+  <command:command>
+    <command:details>
+      <command:name>Remove-TtdBookmark</command:name>
+      <maml:description>
+        <maml:para>TTD ドライブに登録されたブックマークを名前で削除します。存在しない名前を指定しても無害 (silent no-op) です。</maml:para>
+      </maml:description>
+      <command:verb>Remove</command:verb>
+      <command:noun>TtdBookmark</command:noun>
+    </command:details>
+    <maml:description>
+      <maml:para>`Remove-TtdBookmark` は TTD ドライブのブックマーク辞書から指定名のエントリを削除します。削除後は `ttd:\bookmarks\&lt;Name&gt;\` はアクセス不能になります (親の `bookmarks\` 列挙からも消えます)。</maml:para>
+      <maml:para>存在しない名前を渡しても **エラーにはなりません** (`ConcurrentDictionary.TryRemove` が失敗するだけ)。スクリプトから冪等に呼ぶ用途を想定しています。一覧を確認してから削除したい場合は `Get-TtdBookmark` と組み合わせてください。</maml:para>
+      <maml:para>削除対象は `TtdDriveInfo` 上の in-memory 辞書のみで、TTD レコーディングファイル (`.run`) には一切手を加えません。</maml:para>
+    </maml:description>
+    <command:syntax>
+      <command:syntaxItem>
+        <maml:name>Remove-TtdBookmark</maml:name>
+        <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+          <maml:name>Drive</maml:name>
+          <maml:description>
+            <maml:para>対象ドライブ名。省略時はカレントロケーションのドライブが使われます。Ttd 以外のドライブを指定するとエラーになります。</maml:para>
+          </maml:description>
+          <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="0" aliases="none">
+          <maml:name>Name</maml:name>
+          <maml:description>
+            <maml:para>削除するブックマーク名。存在しない名前を指定してもエラーにはならず、何も起きません。</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="false" variableLength="false" globbing="false" pipelineInput="false" position="Named" aliases="none">
+        <maml:name>Drive</maml:name>
+        <maml:description>
+          <maml:para>対象ドライブ名。省略時はカレントロケーションのドライブが使われます。Ttd 以外のドライブを指定するとエラーになります。</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" variableLength="false" globbing="false" pipelineInput="false" position="0" aliases="none">
+        <maml:name>Name</maml:name>
+        <maml:description>
+          <maml:para>削除するブックマーク名。存在しない名前を指定してもエラーにはならず、何も起きません。</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="true">System.String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:inputTypes>
+      <command:inputType>
+        <dev:type>
+          <dev:name>None</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>パイプライン入力はありません。</maml:para>
+        </maml:description>
+      </command:inputType>
+    </command:inputTypes>
+    <command:returnValues>
+      <command:returnValue>
+        <dev:type>
+          <dev:name>None</dev:name>
+        </dev:type>
+        <maml:description>
+          <maml:para>出力はありません。</maml:para>
+        </maml:description>
+      </command:returnValue>
+    </command:returnValues>
+    <maml:alertSet>
+      <maml:alert>
+        <maml:para>- Ttd ドライブ専用です。Dump / Trace ドライブに対して呼ぶとエラーになります。
+- 存在しない名前に対しても silent no-op のため、事前チェック (`Get-TtdBookmark -Name &lt;name&gt;`) は不要です。
+- 削除は in-memory の辞書のみで、TTD レコーディングファイル (`.run`) には一切影響しません。
+- `Remove-PSDrive` でドライブそのものを外せば、そのドライブのブックマークもすべて破棄されます。</maml:para>
+      </maml:alert>
+    </maml:alertSet>
+    <command:examples>
+      <command:example>
+        <maml:title>--------- Example 1: 名前を指定して削除 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS ttd:\&gt; Remove-TtdBookmark crash-point
+```</maml:para>          <maml:para>`crash-point` ブックマークを削除します。以降 `ttd:\bookmarks\crash-point\` は見えなくなります。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 2: 全ブックマークをまとめて削除 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS ttd:\&gt; Get-TtdBookmark | % { Remove-TtdBookmark $_.Name }
+```</maml:para>          <maml:para>登録済みブックマークを全件削除します。`TtdDriveInfo` を `Remove-PSDrive` するだけでも消えますが、ドライブは残したまま辞書だけクリアしたい場合に使います。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 3: 存在しない名前でも安全に呼べる (冪等) ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS ttd:\&gt; Remove-TtdBookmark crash-point
+PS ttd:\&gt; Remove-TtdBookmark crash-point   # 何も起きない
+```</maml:para>          <maml:para>2 回目の呼び出しはサイレントで何もしません。スクリプトの冪等なクリーンアップ処理としてそのまま埋め込めます。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+      <command:example>
+        <maml:title>--------- Example 4: 特定ドライブから削除 ---------</maml:title>
+        <maml:introduction>
+          <maml:para>```powershell
+PS C:\&gt; Remove-TtdBookmark -Name crash-point -Drive ttd2
+```</maml:para>          <maml:para>複数 TTD ドライブをマウントしているとき、`-Drive` でどのドライブから消すかを明示します。</maml:para>
+        </maml:introduction>
+        <dev:code />
+        <dev:remarks />
+      </command:example>
+    </command:examples>
+    <command:relatedLinks>
+      <maml:navigationLink>
+        <maml:linkText>New-TtdBookmark</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+      <maml:navigationLink>
+        <maml:linkText>Get-TtdBookmark</maml:linkText>
+        <command:uri />
+      </maml:navigationLink>
+    </command:relatedLinks>
+  </command:command>
+</helpItems>

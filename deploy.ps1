@@ -86,6 +86,18 @@ Copy-Item (Join-Path $tracerOutput '0Harmony.dll') $binPath
 $stjDll = Join-Path $tracerOutput 'System.Text.Json.dll'
 if (Test-Path $stjDll) { Copy-Item $stjDll $binPath }
 
+# ── Help: XML (Get-Help <cmdlet>) + about_ topics ──────────────────────
+# PlatyPS emits the MAML XML into module/{en-US,ja-JP}/ and about_ topics
+# are hand-maintained alongside. Both locales get the same files so
+# $PSUICulture resolution lands on them regardless of OS locale.
+foreach ($locale in 'en-US', 'ja-JP') {
+    $src = Join-Path $moduleSource $locale
+    if (-not (Test-Path $src)) { continue }
+    $dst = Join-Path $ModulePath $locale
+    New-Item -Path $dst -ItemType Directory -Force | Out-Null
+    Copy-Item "$src\*" $dst -Force
+}
+
 Write-Host "Deployed to $ModulePath" -ForegroundColor Green
 Write-Host "Root:"
 Get-ChildItem $ModulePath -File | Format-Table Name, Length -AutoSize
