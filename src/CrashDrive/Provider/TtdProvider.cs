@@ -189,6 +189,14 @@ public sealed class TtdProvider : ProviderBase
             if (segs.Length < 2) return new(PathKind.Invalid, segs);
             var encPos = segs[1];
             if (!Ttd.TtdPosition.IsValid(encPos)) return new(PathKind.Invalid, segs);
+            // Symbolic aliases (start/end/first-exception/…) that the trace
+            // can't satisfy — e.g. "first-exception" when ExceptionEvents is
+            // empty — are rejected here so every downstream path under them
+            // short-circuits to Invalid instead of silently falling back to
+            // lifetime start.
+            if (Ttd.TtdPosition.IsSymbolicName(encPos)
+                && ResolvePositionOrNull(encPos) == null)
+                return new(PathKind.Invalid, segs);
 
             if (segs.Length == 2) return new(PathKind.PositionFolder, segs, EncodedPosition: encPos);
             if (segs.Length == 3 && segs[2].Equals("position.json", StringComparison.OrdinalIgnoreCase))
@@ -315,13 +323,28 @@ public sealed class TtdProvider : ProviderBase
         _ => "w",
     };
 
-    /// <summary>Resolve an encoded position (including "start"/"end") to the native TTD form.</summary>
-    private string ResolvePosition(string encoded) => encoded switch
+    /// <summary>Resolve an encoded position (symbolic name or encoded form) to the
+    /// native TTD form. Returns null only for aliases whose data source is empty
+    /// (e.g. "first-exception" on a recording with zero exceptions).</summary>
+    private string? ResolvePositionOrNull(string encoded) => encoded switch
     {
         "start" => Store.Summary.LifetimeStart,
-        "end" => Store.Summary.LifetimeEnd,
+        "end"   => Store.Summary.LifetimeEnd,
+        "first-exception" => Store.ExceptionEvents.Count > 0
+            ? Store.ExceptionEvents[0].Event.Position : null,
+        "last-exception"  => Store.ExceptionEvents.Count > 0
+            ? Store.ExceptionEvents[^1].Event.Position : null,
+        "last-meaningful-event" => Store.SignificantEvents.Count > 0
+            ? Store.SignificantEvents[^1].Event.Position : null,
         _ => Ttd.TtdPosition.Decode(encoded),
     };
+
+    /// <summary>Non-null variant for code paths that have already confirmed the
+    /// alias resolves (via <see cref="ItemExists"/>). Falls back to the lifetime
+    /// start if a missing alias slips through, which keeps dbgeng calls from
+    /// receiving a null seek target.</summary>
+    private string ResolvePosition(string encoded)
+        => ResolvePositionOrNull(encoded) ?? Store.Summary.LifetimeStart;
 
     // === Path operations ===
 
@@ -558,9 +581,21 @@ public sealed class TtdProvider : ProviderBase
 
     private string PositionDescription(string encodedPosition)
     {
-        if (encodedPosition == "start") return $"Lifetime start ({Store.Summary.LifetimeStart})";
-        if (encodedPosition == "end") return $"Lifetime end ({Store.Summary.LifetimeEnd})";
-        // Look up event at this position
+        switch (encodedPosition)
+        {
+            case "start": return $"Lifetime start ({Store.Summary.LifetimeStart})";
+            case "end":   return $"Lifetime end ({Store.Summary.LifetimeEnd})";
+            case "first-exception":
+                return Store.ExceptionEvents.Count > 0
+                    ? $"{Store.ExceptionEvents[0].Event.Type} @ {Store.ExceptionEvents[0].Event.Position}" : "";
+            case "last-exception":
+                return Store.ExceptionEvents.Count > 0
+                    ? $"{Store.ExceptionEvents[^1].Event.Type} @ {Store.ExceptionEvents[^1].Event.Position}" : "";
+            case "last-meaningful-event":
+                return Store.SignificantEvents.Count > 0
+                    ? $"{Store.SignificantEvents[^1].Event.Type} @ {Store.SignificantEvents[^1].Event.Position}" : "";
+        }
+        // Look up event at this encoded hex position.
         var native = Ttd.TtdPosition.Decode(encodedPosition);
         var ev = Store.Events.FirstOrDefault(e => e.Position == native);
         return ev != null ? $"{ev.Type} @ {ev.Position}" : "";
@@ -654,10 +689,19 @@ public sealed class TtdProvider : ProviderBase
                 break;
 
             case PathKind.PositionsFolder:
-                // Symbolic positions
+                // Lifetime anchors — always present.
                 yield return ("start", true);
                 yield return ("end", true);
-                // Event positions (encoded)
+                // Event-derived aliases — listed only when the backing data exists.
+                if (Store.ExceptionEvents.Count > 0)
+                {
+                    yield return ("first-exception", true);
+                    if (Store.ExceptionEvents.Count > 1)
+                        yield return ("last-exception", true);
+                }
+                if (Store.SignificantEvents.Count > 0)
+                    yield return ("last-meaningful-event", true);
+                // Encoded positions for every unique event location.
                 var seen = new HashSet<string>();
                 foreach (var ev in Store.Events)
                 {
@@ -928,6 +972,27 @@ public sealed class TtdProvider : ProviderBase
                     $"Lifetime start ({Store.Summary.LifetimeStart})", null);
                 WriteFolder("end", MakePath(path, "end"), dir,
                     $"Lifetime end ({Store.Summary.LifetimeEnd})", null);
+                if (Store.ExceptionEvents.Count > 0)
+                {
+                    var fx = Store.ExceptionEvents[0];
+                    WriteFolder("first-exception",
+                        MakePath(path, "first-exception"), dir,
+                        $"{fx.Event.Type} @ {fx.Event.Position}", null);
+                    if (Store.ExceptionEvents.Count > 1)
+                    {
+                        var lx = Store.ExceptionEvents[^1];
+                        WriteFolder("last-exception",
+                            MakePath(path, "last-exception"), dir,
+                            $"{lx.Event.Type} @ {lx.Event.Position}", null);
+                    }
+                }
+                if (Store.SignificantEvents.Count > 0)
+                {
+                    var lm = Store.SignificantEvents[^1];
+                    WriteFolder("last-meaningful-event",
+                        MakePath(path, "last-meaningful-event"), dir,
+                        $"{lm.Event.Type} @ {lm.Event.Position}", null);
+                }
                 var seen = new HashSet<string>();
                 foreach (var ev in Store.Events)
                 {

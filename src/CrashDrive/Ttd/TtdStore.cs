@@ -730,12 +730,21 @@ public static class TtdPosition
 
     public static bool IsValid(string encodedPosition)
     {
-        // Accept "<hex>_<hex>" or "start"/"end" symbolic names.
-        if (encodedPosition is "start" or "end") return true;
+        // Accept "<hex>_<hex>" or "start"/"end" symbolic names plus event aliases.
+        if (IsSymbolicName(encodedPosition)) return true;
         var idx = encodedPosition.IndexOf('_');
         if (idx <= 0 || idx >= encodedPosition.Length - 1) return false;
         return IsHex(encodedPosition[..idx]) && IsHex(encodedPosition[(idx + 1)..]);
     }
+
+    /// <summary>Recognize the fixed set of symbolic position names (lifetime
+    /// anchors + event aliases). Whether a specific alias actually resolves
+    /// to data is decided by the provider at <c>ItemExists</c> / enumeration
+    /// time — this is purely a syntactic check.</summary>
+    public static bool IsSymbolicName(string name) => name is
+        "start" or "end"
+        or "first-exception" or "last-exception"
+        or "last-meaningful-event";
 
     private static bool IsHex(string s)
     {

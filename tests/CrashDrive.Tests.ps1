@@ -166,6 +166,25 @@ Describe 'TTD provider' -Tag 'Ttd' -Skip:(-not $HasTtd) {
         (Get-TtdBookmark -Drive smoke_ttd).Name | Should -Be 'crash-point'
     }
 
+    It 'exposes position aliases when backing data exists' {
+        # python01.run has no exceptions; has many significant events.
+        # So first-/last-exception should NOT be listed, last-meaningful-event should.
+        New-CrashDrive smoke_ttd $TtdPath
+        $names = (Get-ChildItem smoke_ttd:\positions).Name
+        $names | Should -Contain 'start'
+        $names | Should -Contain 'end'
+        $names | Should -Contain 'last-meaningful-event'
+        $names | Should -Not -Contain 'first-exception'
+        $names | Should -Not -Contain 'last-exception'
+
+        # Missing alias path must report as absent (not silently resolve to start)
+        Test-Path smoke_ttd:\positions\first-exception | Should -BeFalse
+
+        # Present alias drills into the normal position tree
+        (Get-ChildItem smoke_ttd:\positions\last-meaningful-event).Name |
+            Should -Contain 'position.json'
+    }
+
     It 'rejects bookmark names containing path separators' {
         New-CrashDrive smoke_ttd $TtdPath
         { New-TtdBookmark -Drive smoke_ttd -Name 'bad/name' -Position start -ErrorAction Stop } |
