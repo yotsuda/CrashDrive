@@ -192,8 +192,8 @@ public sealed class TraceProvider : ProviderBase
     {
         var info = Parse(NormalizePath(path));
         try { WriteChildren(info, path); }
-        catch (PipelineStoppedException) { /* Select-Object -First etc.; not an error */ }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException
+                                   and not PipelineStoppedException)
         {
             WriteError(new ErrorRecord(ex, "TraceGetChildError", ErrorCategory.NotSpecified, path));
         }
