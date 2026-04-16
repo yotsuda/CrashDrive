@@ -32,6 +32,12 @@ public sealed class TraceEvent
     [JsonPropertyName("locals")]
     public Dictionary<string, string>? Locals { get; set; }
 
+    [JsonPropertyName("globals")]
+    public Dictionary<string, string>? Globals { get; set; }
+
+    [JsonPropertyName("watch")]
+    public Dictionary<string, string>? Watch { get; set; }
+
     // return
     [JsonPropertyName("value")]
     public string? Value { get; set; }

@@ -11,11 +11,13 @@ Events written: call, return, exception, output.
 Requires Python 3.12+.
 """
 import argparse
+import inspect
 import json
 import os
 import runpy
 import sys
 import traceback
+import types
 from typing import Any
 
 # ---- Safe repr ------------------------------------------------------------
@@ -48,15 +50,89 @@ def snapshot_locals(frame, max_vars: int = 50) -> dict[str, str]:
     return result
 
 
+# Types to exclude from globals snapshot (they're typically modules/functions
+# imported at top of file, uninteresting for bug analysis).
+_GLOBAL_EXCLUDE_TYPES = (types.ModuleType, types.FunctionType, types.BuiltinFunctionType,
+                        type,  # classes
+                        types.MethodType)
+
+
+def snapshot_globals(frame, max_vars: int = 30) -> dict[str, str]:
+    """
+    Capture a filtered snapshot of module globals.
+
+    Skips: dunder names, imports (modules), function/class definitions, callables.
+    Keeps: values (ints, strings, lists, dicts, custom instances).
+    """
+    try:
+        g = frame.f_globals
+    except Exception:
+        return {}
+    result: dict[str, str] = {}
+    count = 0
+    for name, value in g.items():
+        if name.startswith("_"):
+            continue
+        if isinstance(value, _GLOBAL_EXCLUDE_TYPES):
+            continue
+        if callable(value) and not inspect.isroutine(value) is False:
+            # Skip any remaining callables (e.g., C functions bound to names)
+            pass
+        if count >= max_vars:
+            result["..."] = f"(+{len(g) - count} more)"
+            break
+        result[name] = safe_repr(value)
+        count += 1
+    return result
+
+
+def snapshot_watch(frame, watch_names: list[str]) -> dict[str, str]:
+    """
+    Return a snapshot of specific named variables. Searches locals first,
+    then globals, then nothing. Supports dotted paths like "obj.attr.sub".
+    """
+    if not watch_names:
+        return {}
+    result: dict[str, str] = {}
+    try:
+        local_ns = frame.f_locals
+        global_ns = frame.f_globals
+    except Exception:
+        return {}
+
+    for expr in watch_names:
+        try:
+            parts = expr.split(".")
+            root = parts[0]
+            if root in local_ns:
+                val = local_ns[root]
+            elif root in global_ns:
+                val = global_ns[root]
+            else:
+                result[expr] = "<not found>"
+                continue
+            for attr in parts[1:]:
+                val = getattr(val, attr, "<attr missing>")
+                if val == "<attr missing>":
+                    break
+            result[expr] = safe_repr(val)
+        except Exception as e:
+            result[expr] = f"<eval-error: {type(e).__name__}>"
+    return result
+
+
 # ---- State ---------------------------------------------------------------
 
 class Tracer:
-    def __init__(self, output_path: str, filter_prefix: str, events: set[str]):
+    def __init__(self, output_path: str, filter_prefix: str, events: set[str],
+                 include_globals: bool = False, watch_names: list[str] | None = None):
         self.fp = open(output_path, "w", encoding="utf-8", buffering=1)
         self.filter_prefix = os.path.normcase(os.path.abspath(filter_prefix))
         self.events = events
         self.seq = 0
         self.depth = 0
+        self.include_globals = include_globals
+        self.watch_names = watch_names or []
 
     def should_trace(self, filename: str) -> bool:
         if not filename:
@@ -104,7 +180,7 @@ def on_py_start(code, offset):
         return
     frame = sys._getframe(1)
     TRACER.depth += 1
-    TRACER.emit(
+    event: dict[str, Any] = dict(
         type="call",
         file=code.co_filename,
         line=frame.f_lineno,
@@ -112,6 +188,11 @@ def on_py_start(code, offset):
         depth=TRACER.depth,
         locals=snapshot_locals(frame),
     )
+    if TRACER.include_globals:
+        event["globals"] = snapshot_globals(frame)
+    if TRACER.watch_names:
+        event["watch"] = snapshot_watch(frame, TRACER.watch_names)
+    TRACER.emit(**event)
 
 
 def on_py_return(code, offset, retval):
@@ -141,7 +222,7 @@ def on_raise(code, offset, exception):
     if "exception" not in TRACER.events:
         return
     frame = sys._getframe(1)
-    TRACER.emit(
+    event: dict[str, Any] = dict(
         type="exception",
         file=code.co_filename,
         line=frame.f_lineno,
@@ -151,6 +232,11 @@ def on_raise(code, offset, exception):
         message=safe_repr(exception),
         locals=snapshot_locals(frame),
     )
+    # Always include globals and watch on exceptions — diagnostic value is high
+    event["globals"] = snapshot_globals(frame)
+    if TRACER.watch_names:
+        event["watch"] = snapshot_watch(frame, TRACER.watch_names)
+    TRACER.emit(**event)
 
 
 def on_py_unwind(code, offset, exception):
@@ -173,15 +259,23 @@ def main() -> int:
                         help="Only trace files under this directory")
     parser.add_argument("--events", default="call,return,exception",
                         help="Comma-separated event types to capture")
+    parser.add_argument("--include-globals", action="store_true",
+                        help="Include filtered module globals in every call event")
+    parser.add_argument("--watch", default="",
+                        help="Comma-separated variable names (or dotted paths) to "
+                             "snapshot into every event's 'watch' field")
     parser.add_argument("target", help="Target Python program to run")
     parser.add_argument("target_args", nargs=argparse.REMAINDER,
                         help="Arguments passed to the target program")
     args = parser.parse_args()
 
     events = set(e.strip() for e in args.events.split(",") if e.strip())
+    watch_names = [w.strip() for w in args.watch.split(",") if w.strip()]
 
     global TRACER
-    TRACER = Tracer(args.output, args.filter_prefix, events)
+    TRACER = Tracer(args.output, args.filter_prefix, events,
+                    include_globals=args.include_globals,
+                    watch_names=watch_names)
     TRACER.emit(type="trace_start",
                 target=args.target,
                 python_version=sys.version,

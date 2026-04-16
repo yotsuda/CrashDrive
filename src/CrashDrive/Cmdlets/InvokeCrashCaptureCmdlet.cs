@@ -40,6 +40,12 @@ public sealed class InvokeCrashCaptureCmdlet : PSCmdlet
     [ValidateRange(1, 3600)]
     public int TimeoutSeconds { get; set; } = 60;
 
+    [Parameter]
+    public SwitchParameter IncludeGlobals { get; set; }
+
+    [Parameter]
+    public string[]? Watch { get; set; }
+
     protected override void ProcessRecord()
     {
         var absProgram = GetUnresolvedProviderPathFromPSPath(Program);
@@ -59,7 +65,8 @@ public sealed class InvokeCrashCaptureCmdlet : PSCmdlet
 
         try
         {
-            RunTracer(Language, absProgram, ArgumentList ?? [], outputPath, Capture, TimeoutSeconds);
+            RunTracer(Language, absProgram, ArgumentList ?? [], outputPath, Capture,
+                TimeoutSeconds, IncludeGlobals.IsPresent, Watch);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -92,7 +99,8 @@ public sealed class InvokeCrashCaptureCmdlet : PSCmdlet
 
     private void RunTracer(
         string language, string program, string[] programArgs,
-        string outputPath, string[] capture, int timeoutSeconds)
+        string outputPath, string[] capture, int timeoutSeconds,
+        bool includeGlobals, string[]? watch)
     {
         if (language != "python")
             throw new NotSupportedException($"Language '{language}' is not supported yet.");
@@ -119,6 +127,13 @@ public sealed class InvokeCrashCaptureCmdlet : PSCmdlet
         psi.ArgumentList.Add(filterPrefix);
         psi.ArgumentList.Add("--events");
         psi.ArgumentList.Add(string.Join(",", capture));
+        if (includeGlobals)
+            psi.ArgumentList.Add("--include-globals");
+        if (watch != null && watch.Length > 0)
+        {
+            psi.ArgumentList.Add("--watch");
+            psi.ArgumentList.Add(string.Join(",", watch));
+        }
         psi.ArgumentList.Add(program);
         foreach (var a in programArgs) psi.ArgumentList.Add(a);
 
