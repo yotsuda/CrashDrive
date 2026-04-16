@@ -374,8 +374,11 @@ public sealed class TtdProvider : ProviderBase
     // === Children ===
 
     protected override void GetChildItems(string path, bool recurse)
+        => GetChildItems(path, recurse, uint.MaxValue);
+
+    protected override void GetChildItems(string path, bool recurse, uint depth)
     {
-        try { WriteChildrenRecursive(path, recurse); }
+        try { WriteChildrenRecursive(path, recurse, depth); }
         catch (Exception ex) when (ex is not OperationCanceledException
                                    and not PipelineStoppedException)
         {
@@ -383,16 +386,16 @@ public sealed class TtdProvider : ProviderBase
         }
     }
 
-    private void WriteChildrenRecursive(string path, bool recurse)
+    private void WriteChildrenRecursive(string path, bool recurse, uint depth)
     {
         var info = Parse(NormalizePath(path));
         WriteChildren(info, path);
-        if (!recurse) return;
+        if (!recurse || depth == 0) return;
         foreach (var (name, isContainer) in Enumerate(info))
         {
             if (Stopping) return;
             if (!isContainer) continue;
-            WriteChildrenRecursive(MakePath(path, name), recurse: true);
+            WriteChildrenRecursive(MakePath(path, name), recurse: true, depth - 1);
         }
     }
 
