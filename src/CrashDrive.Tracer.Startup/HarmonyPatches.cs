@@ -1,4 +1,7 @@
+using System.Collections.Concurrent;
 using System.Reflection;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
 using System.Text.RegularExpressions;
 using HarmonyLib;
 
@@ -190,9 +193,10 @@ internal sealed class HarmonyPatches
         }
         catch { }
 
+        var (file, line) = ResolveSource(__originalMethod);
         emitter.EmitCall(
-            file: __originalMethod.DeclaringType?.Assembly.GetName().Name ?? "",
-            line: 0,
+            file: file,
+            line: line,
             function: FormatMethodName(__originalMethod),
             locals: locals);
     }
@@ -208,9 +212,10 @@ internal sealed class HarmonyPatches
             value = SafeRepr(__result);
         }
 
+        var (file, line) = ResolveSource(__originalMethod);
         emitter.EmitReturn(
-            file: __originalMethod.DeclaringType?.Assembly.GetName().Name ?? "",
-            line: 0,
+            file: file,
+            line: line,
             function: FormatMethodName(__originalMethod),
             value: value);
     }
@@ -224,9 +229,10 @@ internal sealed class HarmonyPatches
         var emitter = s_emitter;
         if (emitter == null || emitter.IsSuppressed) return __exception;
 
+        var (file, line) = ResolveSource(__originalMethod);
         emitter.EmitException(
-            file: __originalMethod.DeclaringType?.Assembly.GetName().Name ?? "",
-            line: 0,
+            file: file,
+            line: line,
             function: FormatMethodName(__originalMethod),
             ex: __exception);
 
@@ -246,6 +252,104 @@ internal sealed class HarmonyPatches
     private static void Debug(string msg)
     {
         if (s_debug) Console.Error.WriteLine($"[CrashDrive.Tracer] {msg}");
+    }
+
+    // ── Portable-PDB sequence-point lookup ────────────────────────────
+    //
+    // Gives trace events real (file, line) coordinates instead of
+    // (<assembly-name>, 0). Works only for portable PDBs — Windows PDB
+    // (MSF container) is not readable via System.Reflection.Metadata.
+    // Microsoft BCL ships public Windows PDBs, so framework methods stay
+    // unresolved; user-authored assemblies typically ship portable PDBs.
+    //
+    // Per-method cache is keyed by MetadataToken because two MethodBase
+    // instances can share a token across reflection callers. Per-assembly
+    // reader is kept alive for the process lifetime; the tracer's .pdb
+    // fetch is irreversible anyway and we never hot-reload PDBs in a
+    // target process.
+
+    private static readonly ConcurrentDictionary<Assembly, MetadataReaderProvider?> s_pdbProviders
+        = new();
+    private static readonly ConcurrentDictionary<int, (string File, int Line)?> s_sourceCache
+        = new();
+
+    private static (string File, int Line) ResolveSource(MethodBase m)
+    {
+        var assemblyFallback = m.DeclaringType?.Assembly.GetName().Name ?? "";
+        var resolved = TryResolveSource(m);
+        return resolved is (string file, int line)
+            ? (file, line)
+            : (assemblyFallback, 0);
+    }
+
+    private static (string File, int Line)? TryResolveSource(MethodBase m)
+    {
+        if (s_sourceCache.TryGetValue(m.MetadataToken, out var cached))
+            return cached;
+
+        var result = ComputeSource(m);
+        s_sourceCache[m.MetadataToken] = result;
+        return result;
+    }
+
+    private static (string File, int Line)? ComputeSource(MethodBase m)
+    {
+        var asm = m.DeclaringType?.Assembly;
+        if (asm == null || asm.IsDynamic) return null;
+
+        var provider = s_pdbProviders.GetOrAdd(asm, TryOpenPortablePdb);
+        var reader = provider?.GetMetadataReader();
+        if (reader == null) return null;
+
+        // MethodDebugInformation is indexed by the MethodDef row (low 24 bits
+        // of the MetadataToken; top 8 bits are the 0x06 table id for MethodDef).
+        var row = m.MetadataToken & 0x00FFFFFF;
+        if (row == 0) return null;
+
+        MethodDebugInformation mdi;
+        try { mdi = reader.GetMethodDebugInformation(MetadataTokens.MethodDebugInformationHandle(row)); }
+        catch { return null; }
+
+        try
+        {
+            foreach (var sp in mdi.GetSequencePoints())
+            {
+                if (sp.IsHidden) continue;
+                var doc = reader.GetDocument(sp.Document);
+                var file = reader.GetString(doc.Name);
+                return (file, sp.StartLine);
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static MetadataReaderProvider? TryOpenPortablePdb(Assembly asm)
+    {
+        var loc = SafeLocation(asm);
+        if (string.IsNullOrEmpty(loc)) return null;
+        var pdb = Path.ChangeExtension(loc, ".pdb");
+        if (!File.Exists(pdb)) return null;
+
+        try
+        {
+            // Portable PDB begins with the ECMA-335 metadata header "BSJB"
+            // (0x424A5342). Windows PDB starts with the MSF header
+            // "Microsoft C/C++ MSF 7.00\r\n\u001aDS". Only the former is
+            // readable by System.Reflection.Metadata; reject the latter
+            // before trying to open it (MetadataReaderProvider would throw).
+            using (var peek = File.OpenRead(pdb))
+            {
+                Span<byte> header = stackalloc byte[4];
+                if (peek.Read(header) != 4) return null;
+                if (header[0] != 0x42 || header[1] != 0x53
+                    || header[2] != 0x4A || header[3] != 0x42)
+                    return null;
+            }
+            var stream = File.OpenRead(pdb);
+            return MetadataReaderProvider.FromPortablePdbStream(stream);
+        }
+        catch { return null; }
     }
 
     private static string SafeRepr(object? v)

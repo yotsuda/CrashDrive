@@ -15,10 +15,12 @@ BeforeDiscovery {
     $script:TracePath = Join-Path $script:Scratch 'cart.jsonl'
     $script:TtdPath   = Join-Path $script:Scratch 'ttd\python01.run'
     $script:PyTarget  = Join-Path $script:Scratch 'sample_target.py'
+    $script:TinyApp   = Join-Path $script:Scratch 'tinyapp\bin\Debug\net8.0\tinyapp.exe'
     $script:HasDump   = Test-Path $script:DumpPath
     $script:HasTrace  = Test-Path $script:TracePath
     $script:HasTtd    = Test-Path $script:TtdPath
     $script:HasPy     = Test-Path $script:PyTarget
+    $script:HasTiny   = Test-Path $script:TinyApp
 }
 
 BeforeAll {
@@ -242,5 +244,29 @@ Describe 'Capture round-trip (Python)' -Tag 'Capture' -Skip:(-not $HasPy) {
         New-CrashDrive smoke_cap -ExecutablePath $PyTarget
         $names = (Get-ChildItem smoke_cap:\).Name
         $names | Should -Contain 'events'
+    }
+}
+
+Describe 'Capture round-trip (.NET tracer file/line)' -Tag 'Capture' -Skip:(-not $HasTiny) {
+    AfterEach { Remove-SmokeDrives }
+
+    It 'resolves portable-PDB sequence points for user methods' {
+        # tinyapp is built Debug so .pdb is portable. We expect real Program.cs
+        # line numbers on Add/Multiply/Divide — not line=0 with assembly name.
+        New-CrashDrive smoke_cap -ExecutablePath $TinyApp
+        $count = (Get-ChildItem smoke_cap:\events).Count
+        $count | Should -BeGreaterThan 5
+
+        # Scan the middle of the stream for a user method event.
+        $events = 2..($count-2) | ForEach-Object {
+            Get-Content "smoke_cap:\events\$_.json" | ConvertFrom-Json
+        }
+        $addEvents = $events | Where-Object function -match 'TinyApp\.Program\.Add'
+        $addEvents.Count | Should -BeGreaterThan 0
+
+        foreach ($e in $addEvents[0..([math]::Min(2, $addEvents.Count - 1))]) {
+            $e.file | Should -Match '\.cs$' -Because 'source file should resolve to Program.cs, not the assembly name'
+            $e.line | Should -BeGreaterThan 0
+        }
     }
 }
