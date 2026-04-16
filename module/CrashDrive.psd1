@@ -13,6 +13,7 @@
         'Invoke-CrashCapture'
         'Enable-CrashEditorFollow'
         'Disable-CrashEditorFollow'
+        'Read-CrashMemory'
     )
     FunctionsToExport    = @()
     AliasesToExport      = @()

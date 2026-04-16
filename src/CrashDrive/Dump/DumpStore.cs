@@ -139,6 +139,17 @@ public sealed class DumpStore : IStore
         }
     }
 
+    /// <summary>Run an arbitrary dbgeng command against this dump's shared session.
+    /// Intended for cmdlets that need raw debugger access (memory reads, u/x/dt, etc.).</summary>
+    public string ExecuteDbgCommand(string command)
+    {
+        lock (_regLock)
+        {
+            _regSession ??= DbgEngSession.Open(FilePath, _symbolPath);
+            return _regSession.Execute(command);
+        }
+    }
+
     private string RunAnalyze()
     {
         try

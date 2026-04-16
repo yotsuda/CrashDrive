@@ -74,6 +74,34 @@ public sealed class TtdStore : IStore
         }
     }
 
+    /// <summary>Run an arbitrary dbgeng command, optionally after seeking to a
+    /// position and/or switching to a thread. Intended for raw debugger access
+    /// from cmdlets (db/u/x/dx/!dumpobj etc.). Position may be "start"/"end"
+    /// aliases or a native major:minor string.</summary>
+    public string ExecuteDbgCommand(string command, string? position = null, string? threadId = null)
+    {
+        lock (_posLock)
+        {
+            if (position != null)
+            {
+                var native = position switch
+                {
+                    "start" => Summary.LifetimeStart,
+                    "end" => Summary.LifetimeEnd,
+                    _ => position,
+                };
+                SeekTo(native);
+            }
+            if (threadId != null)
+            {
+                var tid = threadId.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                    ? threadId[2..] : threadId;
+                return Session.Execute($"~~[0x{tid}]s;{command}");
+            }
+            return Session.Execute(command);
+        }
+    }
+
     /// <summary>Dump register state for the given thread at the given TTD position.
     /// Seeks to the position, switches to the thread, and runs `r`.</summary>
     public string RenderRegistersAtPosition(string position, string threadId)
