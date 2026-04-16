@@ -1,52 +1,131 @@
 # CrashDrive
 
-PowerShell provider that mounts **execution trace files** and **crash dumps**
-as PSDrives. Post-mortem inspection of what a program actually did — via the
-filesystem metaphor humans and AI both already know.
+Mount Windows post-mortem artifacts as PSDrives — `ls`, `cd`, `cat`
+your way through crash dumps, Time-Travel Debugging recordings, and
+execution traces.
 
-## Concept
+## The Idea
 
-When a program crashes (or just runs), it leaves a wake behind:
-- an **execution trace** (function calls, returns, variables at each step)
-- or a **crash dump** (frozen state at the moment of death)
-
-Both are big, structured data. CrashDrive mounts each file as its own
-PSDrive so you can `cd`, `ls`, and `cat` your way through the wreckage.
+A crash dump is a tree of information. A filesystem is the universal
+tree interface. CrashDrive surfaces post-mortem data as paths:
 
 ```powershell
-# Capture a trace, mount it
-$d = Invoke-CrashCapture -Program app.py -Name myapp
+Import-Module CrashDrive
+New-CrashDrive -Name dmp -Path .\crash.dmp
 
-# Mount an existing trace or dump
-$d = New-CrashDrive -Name bug42 -File C:\dumps\crash.dmp
-
-# Browse
-Get-ChildItem myapp:\exceptions
-Get-ChildItem myapp:\by-function\compute
-Get-Content   myapp:\exceptions\1\locals.json
+cd dmp:\threads\12\frames
+Get-ChildItem | Format-Table Index, Method, SourceFile, Line
 ```
 
-## Family
+The same idioms humans already use (`Get-ChildItem`, `Get-Content`,
+`cd`) work identically when an AI agent browses the same drive.
 
-- **[DebuggerDrive](https://github.com/yotsuda/DebuggerDrive)** — live DAP debugger as PSDrive (running process)
-- **CrashDrive** — post-mortem traces + dumps as PSDrives (frozen execution)
+## Providers
 
-Live vs frozen. Driving the debugger vs inspecting the crash site.
+| Provider | Opens                             | Backend              |
+|----------|-----------------------------------|----------------------|
+| `Trace`  | Python `sys.monitoring` JSONL     | direct JSON          |
+| `Dump`   | Windows minidumps, .NET dumps     | ClrMD + dbgeng       |
+| `Ttd`    | Time-Travel Debugging `.run`      | dbgeng + TTDAnalyze  |
 
-## Status
+The provider is picked automatically from the file.
 
-Early work in progress. Python trace (`sys.monitoring`) support first;
-Windows crash dumps (via ClrMD) planned.
+## Path Tour
+
+### Dump drive
+
+```
+dmp:\
+├── summary.json         metadata (arch, CLR flavor, counts)
+├── analyze.txt          !analyze -v output (cached; skipped on non-crash snapshots)
+├── threads\<id>\
+│   ├── info.json
+│   ├── registers.txt
+│   └── frames\<n>       stack frames with SourceFile + Line
+├── modules\             every loaded module (native + managed)
+└── heap\                GC heap types with InstanceCount + TotalBytes
+```
+
+### TTD drive
+
+```
+ttd:\
+├── triage.md            answer-first overview
+├── summary.json
+├── timeline\
+│   ├── events\          all events ordered by position
+│   ├── exceptions\      Type matching Exception*
+│   └── significant\     Module*/Thread* events
+├── positions\
+│   ├── start\           lifetime start
+│   ├── end\             lifetime end
+│   └── <major>_<minor>\ arbitrary time positions
+│       └── threads\<id>\frames\<n>
+├── ttd-events\          notable events during the recording
+├── calls\<module>\<fn>\ every invocation of a named function
+└── memory\<start>_<end>\
+    ├── reads\           read accesses
+    ├── writes\          write accesses
+    ├── first-write.json first write in the range
+    └── last-write-before\<pos>\
+```
+
+## Cmdlets
+
+| Cmdlet                          | Purpose                                                  |
+|---------------------------------|----------------------------------------------------------|
+| `New-CrashDrive`                | Mount a trace, dump, or TTD recording as a PSDrive       |
+| `Invoke-CrashCapture`           | Capture a Python `sys.monitoring` trace and mount it     |
+| `Enable-CrashEditorFollow`      | `cd` into a frame/event → editor jumps to the line       |
+| `Disable-CrashEditorFollow`     | Turn it off                                              |
+| `Read-CrashMemory`              | Raw memory read through the shared dbgeng session        |
+| `Get-CrashObject`               | Managed heap object inspection via ClrMD                 |
+| `Get-CrashLocalVariable`        | Inspect locals at a frame (dbgeng `dv`)                  |
+
+## Source Resolution
+
+- **Native frames** resolve via dbgeng `ln`. Works when the module
+  has private or source-indexed PDBs. Public Microsoft PDBs lack
+  source info and return null.
+- **Managed frames** resolve via ClrMD + portable PDB sequence
+  points. Requires `DumpType.Full` for arbitrary JIT IPs; `WithHeap`
+  may resolve stack-frame IPs but is not guaranteed. Only portable
+  PDBs are supported (matches modern .NET defaults).
+
+With `Enable-CrashEditorFollow`, `cd` into a frame or event jumps
+VS Code straight to `SourceFile:Line`.
 
 ## Requirements
 
-- .NET 8 SDK (build)
+- Windows
 - PowerShell 7.4+
-- Python 3.12+ (for capturing Python traces)
+- .NET 8 SDK (build only)
+- **WinDbg Preview** from the Microsoft Store — required for the
+  `Ttd` provider (System32 dbgeng cannot open `.run` files)
+- Python 3.12+ — only for `Invoke-CrashCapture`
 
 ## Install
+
+From source:
 
 ```powershell
 .\deploy.ps1
 Import-Module CrashDrive
 ```
+
+PSGallery install will land at 1.0.
+
+## Status
+
+Pre-1.0 (0.9.x). Core providers are operational and used regularly
+for real investigations; the API surface may still change before
+the 1.0 cut.
+
+## Related
+
+- **[DebuggerDrive](https://github.com/yotsuda/DebuggerDrive)** —
+  live DAP debugger as a PSDrive. CrashDrive's post-mortem sibling.
+
+## License
+
+[MIT](LICENSE).

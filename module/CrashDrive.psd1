@@ -26,7 +26,7 @@
     PrivateData          = @{
         PSData = @{
             Tags       = @('Debug', 'Trace', 'CrashDump', 'Provider', 'PSDrive', 'Forensics')
-            LicenseUri = 'https://github.com/yotsuda/CrashDrive/blob/main/LICENSE'
+            LicenseUri = 'https://github.com/yotsuda/CrashDrive/blob/master/LICENSE'
             ProjectUri = 'https://github.com/yotsuda/CrashDrive'
         }
     }
