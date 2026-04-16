@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Deploy builds both projects and lays out the module tree under
+      # %ProgramFiles%\PowerShell\7\Modules\CrashDrive so Import-Module
+      # picks it up by name, exactly like a user install.
+      - name: Deploy module
+        shell: pwsh
+        run: ./deploy.ps1
+
+      - name: Show installed module
+        shell: pwsh
+        run: Get-Module CrashDrive -ListAvailable | Format-List Name, Version, Path
+
+      # Sample artifacts (self.dmp, python01.run, cart.jsonl) aren't in the
+      # repo, so the Dump/Ttd/Trace tests skip in CI. The module-manifest
+      # tests still run and catch regressions like a missing export or a
+      # broken provider type load. Python capture would also run but we
+      # skip it unless sample_target.py ships in CI.
+      - name: Run Pester tests
+        shell: pwsh
+        run: ./tests/Run-Tests.ps1 -SkipDeploy
