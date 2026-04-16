@@ -73,6 +73,65 @@ public sealed class TtdStore : IStore
     public IReadOnlyList<TtdEvent> Events => _events.Value;
     public TtdSummary Summary => _summary.Value;
 
+    // ─── Event views (derived, cached) ───────────────────────────────
+    //
+    // Timeline/ folder wants reordered + filtered event slices. Each carries
+    // the original event index so users can still cross-reference ttd-events.
+
+    private IReadOnlyList<TtdEventWithIndex>? _eventsByPosition;
+    private IReadOnlyList<TtdEventWithIndex>? _exceptionEvents;
+    private IReadOnlyList<TtdEventWithIndex>? _significantEvents;
+    private readonly object _eventViewLock = new();
+
+    public IReadOnlyList<TtdEventWithIndex> EventsByPosition
+    {
+        get
+        {
+            if (_eventsByPosition != null) return _eventsByPosition;
+            lock (_eventViewLock)
+            {
+                return _eventsByPosition ??= Events
+                    .Select((e, i) => new TtdEventWithIndex(i, e))
+                    .OrderBy(x => x.Event.Position, PositionComparer.Instance)
+                    .ToList();
+            }
+        }
+    }
+
+    public IReadOnlyList<TtdEventWithIndex> ExceptionEvents
+    {
+        get
+        {
+            if (_exceptionEvents != null) return _exceptionEvents;
+            lock (_eventViewLock)
+            {
+                return _exceptionEvents ??= EventsByPosition
+                    .Where(x => x.Event.Type.StartsWith("Exception", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+        }
+    }
+
+    public IReadOnlyList<TtdEventWithIndex> SignificantEvents
+    {
+        get
+        {
+            if (_significantEvents != null) return _significantEvents;
+            lock (_eventViewLock)
+            {
+                return _significantEvents ??= EventsByPosition
+                    .Where(x => IsSignificant(x.Event.Type))
+                    .ToList();
+            }
+        }
+    }
+
+    private static bool IsSignificant(string type) =>
+        type.Equals("ModuleLoaded", StringComparison.OrdinalIgnoreCase)
+        || type.Equals("ModuleUnloaded", StringComparison.OrdinalIgnoreCase)
+        || type.Equals("ThreadCreated", StringComparison.OrdinalIgnoreCase)
+        || type.Equals("ThreadTerminated", StringComparison.OrdinalIgnoreCase);
+
     // ─── Position navigation ───────────────────────────────────────
     //
     // DbgEng maintains a single "current position" per session. Cache it so
@@ -514,6 +573,46 @@ public sealed class TtdEvent
     public string Position { get; set; } = "";
     public string Type { get; set; } = "";
     public string Module { get; set; } = "";
+}
+
+/// <summary>Pairs a <see cref="TtdEvent"/> with its index in the original
+/// <see cref="TtdStore.Events"/> list. Timeline views reorder/filter the
+/// underlying list but retain this back-pointer so users can cross-reference
+/// with ttd-events\.</summary>
+public readonly record struct TtdEventWithIndex(int OriginalIndex, TtdEvent Event);
+
+/// <summary>Orders "major:minor" hex position strings numerically (not
+/// lexically — "1CBF" must compare before "8F" only by value of the major
+/// part). Handles "start"/"end" aliases by treating them as the extremes.</summary>
+public sealed class PositionComparer : IComparer<string>
+{
+    public static readonly PositionComparer Instance = new();
+
+    public int Compare(string? x, string? y)
+    {
+        if (x == y) return 0;
+        if (x == null) return -1;
+        if (y == null) return 1;
+        var (xMaj, xMin) = Parse(x);
+        var (yMaj, yMin) = Parse(y);
+        var c = xMaj.CompareTo(yMaj);
+        return c != 0 ? c : xMin.CompareTo(yMin);
+    }
+
+    private static (ulong Major, ulong Minor) Parse(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return (0, 0);
+        var colon = s.IndexOf(':');
+        if (colon < 0) return (ParseHex(s), 0);
+        return (ParseHex(s[..colon]), ParseHex(s[(colon + 1)..]));
+    }
+
+    private static ulong ParseHex(string s)
+    {
+        s = s.Trim();
+        return ulong.TryParse(s, System.Globalization.NumberStyles.HexNumber,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0;
+    }
 }
 
 public sealed class TtdThreadAtPosition

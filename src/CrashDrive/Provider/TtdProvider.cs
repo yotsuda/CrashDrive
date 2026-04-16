@@ -60,8 +60,17 @@ public sealed class TtdProvider : ProviderBase
 
     private enum PathKind
     {
-        Root, Summary, Timeline,
+        Root, Summary, Timeline, Triage,
         EventsFolder, EventFile,
+
+        TimelineFolder,                             // timeline/
+        TimelineEventsFolder,                       // timeline/events/
+        TimelineEventFile,                          // timeline/events/<n>.json
+        TimelineExceptionsFolder,                   // timeline/exceptions/
+        TimelineExceptionFile,                      // timeline/exceptions/<n>.json
+        TimelineSignificantFolder,                  // timeline/significant/
+        TimelineSignificantFile,                    // timeline/significant/<n>.json
+
         PositionsFolder,                            // positions/
         PositionFolder,                             // positions/<pos>/
         PositionInfoFile,                           // positions/<pos>/position.json
@@ -110,6 +119,8 @@ public sealed class TtdProvider : ProviderBase
             {
                 "summary.json" => new(PathKind.Summary, segs),
                 "timeline.json" => new(PathKind.Timeline, segs),
+                "triage.md" => new(PathKind.Triage, segs),
+                "timeline" => new(PathKind.TimelineFolder, segs),
                 "ttd-events" => new(PathKind.EventsFolder, segs),
                 "positions" => new(PathKind.PositionsFolder, segs),
                 "calls" => new(PathKind.CallsFolder, segs),
@@ -121,6 +132,31 @@ public sealed class TtdProvider : ProviderBase
             && segs[1].EndsWith(".json", StringComparison.OrdinalIgnoreCase)
             && int.TryParse(segs[1][..^5], out var idx))
             return new(PathKind.EventFile, segs, Index: idx);
+
+        if (head == "timeline")
+        {
+            if (segs.Length == 2)
+            {
+                return segs[1].ToLowerInvariant() switch
+                {
+                    "events" => new(PathKind.TimelineEventsFolder, segs),
+                    "exceptions" => new(PathKind.TimelineExceptionsFolder, segs),
+                    "significant" => new(PathKind.TimelineSignificantFolder, segs),
+                    _ => new(PathKind.Invalid, segs),
+                };
+            }
+            if (segs.Length == 3 && segs[2].EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(segs[2][..^5], out var tlIdx))
+            {
+                return segs[1].ToLowerInvariant() switch
+                {
+                    "events" => new(PathKind.TimelineEventFile, segs, Index: tlIdx),
+                    "exceptions" => new(PathKind.TimelineExceptionFile, segs, Index: tlIdx),
+                    "significant" => new(PathKind.TimelineSignificantFile, segs, Index: tlIdx),
+                    _ => new(PathKind.Invalid, segs),
+                };
+            }
+        }
 
         if (head == "positions")
         {
@@ -220,6 +256,12 @@ public sealed class TtdProvider : ProviderBase
             PathKind.Invalid => false,
             PathKind.EventFile
                 => info.Index is int i && i >= 0 && i < Store.Events.Count,
+            PathKind.TimelineEventFile
+                => info.Index is int ti && ti >= 0 && ti < Store.EventsByPosition.Count,
+            PathKind.TimelineExceptionFile
+                => info.Index is int tei && tei >= 0 && tei < Store.ExceptionEvents.Count,
+            PathKind.TimelineSignificantFile
+                => info.Index is int tsi && tsi >= 0 && tsi < Store.SignificantEvents.Count,
             PathKind.CallFile when info.Module != null && info.Function != null && info.Index is int ci
                 => ci >= 0 && ci < Store.GetCalls(info.Module, info.Function).Count,
             PathKind.MemoryAccessFile when info.MemStart != null && info.MemEnd != null
@@ -234,6 +276,8 @@ public sealed class TtdProvider : ProviderBase
         return Parse(NormalizePath(path)).Kind switch
         {
             PathKind.Root or PathKind.EventsFolder or
+            PathKind.TimelineFolder or PathKind.TimelineEventsFolder or
+            PathKind.TimelineExceptionsFolder or PathKind.TimelineSignificantFolder or
             PathKind.PositionsFolder or PathKind.PositionFolder or
             PathKind.PositionThreadsFolder or PathKind.PositionThreadFolder or
             PathKind.PositionThreadFramesFolder or
@@ -264,6 +308,16 @@ public sealed class TtdProvider : ProviderBase
                     Type = ev.Type, Module = ev.Module,
                     Path = EnsureDrivePrefix(path), Directory = dir,
                 }, path, isContainer: false);
+                break;
+
+            case PathKind.TimelineEventFile when info.Index is int tli && tli >= 0 && tli < Store.EventsByPosition.Count:
+                WriteEventItem(Store.EventsByPosition[tli], name, path, dir);
+                break;
+            case PathKind.TimelineExceptionFile when info.Index is int txi && txi >= 0 && txi < Store.ExceptionEvents.Count:
+                WriteEventItem(Store.ExceptionEvents[txi], name, path, dir);
+                break;
+            case PathKind.TimelineSignificantFile when info.Index is int tsi && tsi >= 0 && tsi < Store.SignificantEvents.Count:
+                WriteEventItem(Store.SignificantEvents[tsi], name, path, dir);
                 break;
 
             case PathKind.CallFile when info.Module != null && info.Function != null
@@ -314,7 +368,7 @@ public sealed class TtdProvider : ProviderBase
                 }
                 break;
 
-            case PathKind.Summary or PathKind.Timeline
+            case PathKind.Summary or PathKind.Timeline or PathKind.Triage
                 or PathKind.PositionInfoFile or PathKind.PositionThreadInfoFile
                 or PathKind.PositionThreadRegistersFile:
                 WriteFile(name, path, dir);
@@ -421,10 +475,31 @@ public sealed class TtdProvider : ProviderBase
         switch (info.Kind)
         {
             case PathKind.Root:
+                yield return ("triage.md", false);
                 yield return ("summary.json", false);
                 yield return ("timeline.json", false);
+                yield return ("timeline", true);
                 yield return ("ttd-events", true);
                 yield return ("positions", true);
+                break;
+
+            case PathKind.TimelineFolder:
+                yield return ("events", true);
+                yield return ("exceptions", true);
+                yield return ("significant", true);
+                break;
+
+            case PathKind.TimelineEventsFolder:
+                for (int i = 0; i < Store.EventsByPosition.Count; i++)
+                    yield return ($"{i}.json", false);
+                break;
+            case PathKind.TimelineExceptionsFolder:
+                for (int i = 0; i < Store.ExceptionEvents.Count; i++)
+                    yield return ($"{i}.json", false);
+                break;
+            case PathKind.TimelineSignificantFolder:
+                for (int i = 0; i < Store.SignificantEvents.Count; i++)
+                    yield return ($"{i}.json", false);
                 break;
 
             case PathKind.EventsFolder:
@@ -520,8 +595,11 @@ public sealed class TtdProvider : ProviderBase
         switch (info.Kind)
         {
             case PathKind.Root:
+                WriteFile("triage.md", MakePath(path, "triage.md"), dir);
                 WriteFile("summary.json", MakePath(path, "summary.json"), dir);
                 WriteFile("timeline.json", MakePath(path, "timeline.json"), dir);
+                WriteFolder("timeline", MakePath(path, "timeline"), dir,
+                    "answer-first event views: events (ordered), exceptions, significant", null);
                 WriteFolder("ttd-events", MakePath(path, "ttd-events"), dir,
                     "notable events during recording", Store.Summary.EventCount);
                 WriteFolder("positions", MakePath(path, "positions"), dir,
@@ -530,6 +608,37 @@ public sealed class TtdProvider : ProviderBase
                     "query calls to specific functions: calls\\<module>\\<function>\\", null);
                 WriteFolder("memory", MakePath(path, "memory"), dir,
                     "memory access history: memory\\<start>_<end>\\{writes,reads,rw}\\", null);
+                break;
+
+            case PathKind.TimelineFolder:
+                WriteFolder("events", MakePath(path, "events"), dir,
+                    "all events ordered by position", Store.EventsByPosition.Count);
+                WriteFolder("exceptions", MakePath(path, "exceptions"), dir,
+                    "events where Type matches Exception*", Store.ExceptionEvents.Count);
+                WriteFolder("significant", MakePath(path, "significant"), dir,
+                    "module loads + thread lifecycle events", Store.SignificantEvents.Count);
+                break;
+
+            case PathKind.TimelineEventsFolder:
+                for (int i = 0; i < Store.EventsByPosition.Count; i++)
+                {
+                    if (Stopping) return;
+                    WriteEventItem(Store.EventsByPosition[i], $"{i}.json", MakePath(path, $"{i}.json"), dir);
+                }
+                break;
+            case PathKind.TimelineExceptionsFolder:
+                for (int i = 0; i < Store.ExceptionEvents.Count; i++)
+                {
+                    if (Stopping) return;
+                    WriteEventItem(Store.ExceptionEvents[i], $"{i}.json", MakePath(path, $"{i}.json"), dir);
+                }
+                break;
+            case PathKind.TimelineSignificantFolder:
+                for (int i = 0; i < Store.SignificantEvents.Count; i++)
+                {
+                    if (Stopping) return;
+                    WriteEventItem(Store.SignificantEvents[i], $"{i}.json", MakePath(path, $"{i}.json"), dir);
+                }
                 break;
 
             case PathKind.CallsFolder:
@@ -701,6 +810,18 @@ public sealed class TtdProvider : ProviderBase
             PathKind.EventFile when info.Index is int i && i >= 0 && i < Store.Events.Count
                 => JsonSerializer.Serialize(Store.Events[i], TraceJson.Options),
 
+            PathKind.Triage => RenderTriage(),
+
+            PathKind.TimelineEventFile when info.Index is int tli
+                    && tli >= 0 && tli < Store.EventsByPosition.Count
+                => SerializeTimelineEvent(Store.EventsByPosition[tli]),
+            PathKind.TimelineExceptionFile when info.Index is int txi
+                    && txi >= 0 && txi < Store.ExceptionEvents.Count
+                => SerializeTimelineEvent(Store.ExceptionEvents[txi]),
+            PathKind.TimelineSignificantFile when info.Index is int tsi
+                    && tsi >= 0 && tsi < Store.SignificantEvents.Count
+                => SerializeTimelineEvent(Store.SignificantEvents[tsi]),
+
             PathKind.PositionInfoFile when info.EncodedPosition != null
                 => JsonSerializer.Serialize(new
                 {
@@ -770,6 +891,96 @@ public sealed class TtdProvider : ProviderBase
         var f = frames.FirstOrDefault(x => x.Index == frameIndex);
         return f != null
             ? JsonSerializer.Serialize(f, TraceJson.Options) : "{}";
+    }
+
+    private void WriteEventItem(TtdEventWithIndex entry, string name, string itemPath, string directory)
+    {
+        WriteItemObject(new Models.TtdEventItem
+        {
+            Index = entry.OriginalIndex,
+            Name = name,
+            Position = entry.Event.Position,
+            Type = entry.Event.Type,
+            Module = entry.Event.Module,
+            Path = EnsureDrivePrefix(itemPath),
+            Directory = directory,
+        }, itemPath, isContainer: false);
+    }
+
+    private string SerializeTimelineEvent(TtdEventWithIndex entry) =>
+        JsonSerializer.Serialize(new
+        {
+            entry.OriginalIndex,
+            entry.Event.Position,
+            entry.Event.Type,
+            entry.Event.Module,
+        }, TraceJson.Options);
+
+    private string RenderTriage()
+    {
+        var s = Store.Summary;
+        var sb = new System.Text.StringBuilder();
+        sb.Append("# TTD Triage: ").AppendLine(Path.GetFileName(s.FilePath));
+        sb.AppendLine();
+        sb.Append("**Recording:** `").Append(s.FilePath).Append("` (")
+          .Append(FormatBytes(s.FileSizeBytes)).AppendLine(")");
+        sb.Append("**Lifetime:** ").Append(s.LifetimeStart).Append(" → ").AppendLine(s.LifetimeEnd);
+        sb.Append("**Threads:** ").Append(s.ThreadCount).AppendLine();
+        sb.Append("**Modules:** ").Append(s.ModuleCount).AppendLine();
+        sb.Append("**Events:** ").Append(s.EventCount).AppendLine();
+        sb.AppendLine();
+
+        var excs = Store.ExceptionEvents;
+        sb.Append("## Exceptions (").Append(excs.Count).AppendLine(")");
+        sb.AppendLine();
+        if (excs.Count == 0)
+        {
+            sb.AppendLine("No exceptions recorded.");
+        }
+        else
+        {
+            foreach (var x in excs.Take(20))
+                sb.Append("- [").Append(x.OriginalIndex).Append("] `")
+                  .Append(x.Event.Position).Append("` ").Append(x.Event.Type)
+                  .Append(' ').AppendLine(x.Event.Module);
+            if (excs.Count > 20) sb.Append("- ... (+").Append(excs.Count - 20).AppendLine(" more)");
+        }
+        sb.AppendLine();
+
+        var sig = Store.SignificantEvents;
+        sb.Append("## Significant events (").Append(sig.Count).AppendLine(")");
+        sb.AppendLine();
+        if (sig.Count == 0)
+        {
+            sb.AppendLine("None.");
+        }
+        else
+        {
+            foreach (var x in sig.Take(25))
+                sb.Append("- [").Append(x.OriginalIndex).Append("] `")
+                  .Append(x.Event.Position).Append("` ").Append(x.Event.Type)
+                  .Append(' ').AppendLine(x.Event.Module);
+            if (sig.Count > 25) sb.Append("- ... (+").Append(sig.Count - 25).AppendLine(" more)");
+        }
+        sb.AppendLine();
+
+        sb.AppendLine("## Where to look next");
+        sb.AppendLine();
+        sb.AppendLine("- `timeline\\exceptions\\` — all exceptions by position");
+        sb.AppendLine("- `timeline\\significant\\` — module loads + thread lifecycle");
+        sb.AppendLine("- `timeline\\events\\` — full event list by position");
+        sb.AppendLine("- `positions\\<pos>\\threads\\` — thread state at a position");
+        sb.AppendLine("- `calls\\<module>\\<function>\\` — call history for a function");
+        sb.AppendLine("- `memory\\<start>_<end>\\` — memory access history for an address range");
+        return sb.ToString();
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:0.0} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):0.0} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):0.00} GB";
     }
 
     private void WriteFolder(string name, string itemPath, string directory, string desc, int? count)
