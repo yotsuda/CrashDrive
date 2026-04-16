@@ -62,10 +62,24 @@ public sealed class TtdProvider : ProviderBase
     {
         Root, Summary, Info, Timeline,
         EventsFolder, EventFile,
+        PositionsFolder,                            // positions/
+        PositionFolder,                             // positions/<pos>/
+        PositionInfoFile,                           // positions/<pos>/position.json
+        PositionThreadsFolder,                      // positions/<pos>/threads/
+        PositionThreadFolder,                       // positions/<pos>/threads/<tid>/
+        PositionThreadInfoFile,                     // positions/<pos>/threads/<tid>/info.json
+        PositionThreadFramesFolder,                 // positions/<pos>/threads/<tid>/frames/
+        PositionFrameFile,                          // positions/<pos>/threads/<tid>/frames/<n>.json
         Invalid,
     }
 
-    private readonly record struct ParsedPath(PathKind Kind, string[] Segments, int? Index = null);
+    private readonly record struct ParsedPath(
+        PathKind Kind,
+        string[] Segments,
+        int? Index = null,
+        string? EncodedPosition = null,
+        string? ThreadId = null,
+        int? FrameIndex = null);
 
     private ParsedPath Parse(string path)
     {
@@ -81,6 +95,7 @@ public sealed class TtdProvider : ProviderBase
                 "info.json" => new(PathKind.Info, segs),
                 "timeline.json" => new(PathKind.Timeline, segs),
                 "ttd-events" => new(PathKind.EventsFolder, segs),
+                "positions" => new(PathKind.PositionsFolder, segs),
                 _ => new(PathKind.Invalid, segs),
             };
         }
@@ -89,8 +104,51 @@ public sealed class TtdProvider : ProviderBase
             && int.TryParse(segs[1][..^5], out var idx))
             return new(PathKind.EventFile, segs, Index: idx);
 
+        if (head == "positions")
+        {
+            // positions/<pos>
+            if (segs.Length < 2) return new(PathKind.Invalid, segs);
+            var encPos = segs[1];
+            if (!Ttd.TtdPosition.IsValid(encPos)) return new(PathKind.Invalid, segs);
+
+            if (segs.Length == 2) return new(PathKind.PositionFolder, segs, EncodedPosition: encPos);
+            if (segs.Length == 3 && segs[2].Equals("position.json", StringComparison.OrdinalIgnoreCase))
+                return new(PathKind.PositionInfoFile, segs, EncodedPosition: encPos);
+            if (segs.Length == 3 && segs[2].Equals("threads", StringComparison.OrdinalIgnoreCase))
+                return new(PathKind.PositionThreadsFolder, segs, EncodedPosition: encPos);
+
+            // positions/<pos>/threads/<tid>/...
+            if (segs.Length >= 4 && segs[2].Equals("threads", StringComparison.OrdinalIgnoreCase))
+            {
+                var tid = segs[3];
+                if (segs.Length == 4) return new(PathKind.PositionThreadFolder, segs, EncodedPosition: encPos, ThreadId: tid);
+                if (segs.Length == 5)
+                {
+                    var sub = segs[4].ToLowerInvariant();
+                    return sub switch
+                    {
+                        "info.json" => new(PathKind.PositionThreadInfoFile, segs, EncodedPosition: encPos, ThreadId: tid),
+                        "frames" => new(PathKind.PositionThreadFramesFolder, segs, EncodedPosition: encPos, ThreadId: tid),
+                        _ => new(PathKind.Invalid, segs),
+                    };
+                }
+                if (segs.Length == 6 && segs[4].Equals("frames", StringComparison.OrdinalIgnoreCase)
+                    && segs[5].EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                    && int.TryParse(segs[5][..^5], out var fi))
+                    return new(PathKind.PositionFrameFile, segs, EncodedPosition: encPos, ThreadId: tid, FrameIndex: fi);
+            }
+        }
+
         return new(PathKind.Invalid, segs);
     }
+
+    /// <summary>Resolve an encoded position (including "start"/"end") to the native TTD form.</summary>
+    private string ResolvePosition(string encoded) => encoded switch
+    {
+        "start" => Store.Summary.LifetimeStart,
+        "end" => Store.Summary.LifetimeEnd,
+        _ => Ttd.TtdPosition.Decode(encoded),
+    };
 
     // === Path operations ===
 
@@ -98,7 +156,16 @@ public sealed class TtdProvider : ProviderBase
         => Parse(NormalizePath(path)).Kind != PathKind.Invalid;
 
     protected override bool IsItemContainer(string path)
-        => Parse(NormalizePath(path)).Kind is PathKind.Root or PathKind.EventsFolder;
+    {
+        return Parse(NormalizePath(path)).Kind switch
+        {
+            PathKind.Root or PathKind.EventsFolder or
+            PathKind.PositionsFolder or PathKind.PositionFolder or
+            PathKind.PositionThreadsFolder or PathKind.PositionThreadFolder or
+            PathKind.PositionThreadFramesFolder => true,
+            _ => false,
+        };
+    }
 
     protected override bool HasChildItems(string path) => IsItemContainer(path);
 
@@ -142,10 +209,55 @@ public sealed class TtdProvider : ProviderBase
                 yield return ("info.json", false);
                 yield return ("timeline.json", false);
                 yield return ("ttd-events", true);
+                yield return ("positions", true);
                 break;
+
             case PathKind.EventsFolder:
                 for (int i = 0; i < Store.Events.Count; i++)
                     yield return ($"{i}.json", false);
+                break;
+
+            case PathKind.PositionsFolder:
+                // Symbolic positions
+                yield return ("start", true);
+                yield return ("end", true);
+                // Event positions (encoded)
+                var seen = new HashSet<string>();
+                foreach (var ev in Store.Events)
+                {
+                    if (string.IsNullOrEmpty(ev.Position)) continue;
+                    var enc = Ttd.TtdPosition.Encode(ev.Position);
+                    if (seen.Add(enc)) yield return (enc, true);
+                }
+                break;
+
+            case PathKind.PositionFolder:
+                yield return ("position.json", false);
+                yield return ("threads", true);
+                break;
+
+            case PathKind.PositionThreadsFolder:
+                if (info.EncodedPosition != null)
+                {
+                    Store.SeekTo(ResolvePosition(info.EncodedPosition));
+                    foreach (var t in Store.GetThreadsAtCurrentPosition())
+                        yield return (t.Id, true);
+                }
+                break;
+
+            case PathKind.PositionThreadFolder:
+                yield return ("info.json", false);
+                yield return ("frames", true);
+                break;
+
+            case PathKind.PositionThreadFramesFolder:
+                if (info.EncodedPosition != null && info.ThreadId != null)
+                {
+                    Store.SeekTo(ResolvePosition(info.EncodedPosition));
+                    var frames = Store.GetFramesAtCurrentPosition(info.ThreadId);
+                    foreach (var f in frames)
+                        yield return ($"{f.Index}.json", false);
+                }
                 break;
         }
     }
@@ -161,12 +273,70 @@ public sealed class TtdProvider : ProviderBase
                 WriteFile("timeline.json", MakePath(path, "timeline.json"), dir);
                 WriteFolder("ttd-events", MakePath(path, "ttd-events"), dir,
                     "notable events during recording", Store.Summary.EventCount);
+                WriteFolder("positions", MakePath(path, "positions"), dir,
+                    "navigable time positions", null);
                 break;
+
             case PathKind.EventsFolder:
                 for (int i = 0; i < Store.Events.Count; i++)
                 {
                     if (Stopping) return;
                     WriteFile($"{i}.json", MakePath(path, $"{i}.json"), dir);
+                }
+                break;
+
+            case PathKind.PositionsFolder:
+                WriteFolder("start", MakePath(path, "start"), dir,
+                    $"Lifetime start ({Store.Summary.LifetimeStart})", null);
+                WriteFolder("end", MakePath(path, "end"), dir,
+                    $"Lifetime end ({Store.Summary.LifetimeEnd})", null);
+                var seen = new HashSet<string>();
+                foreach (var ev in Store.Events)
+                {
+                    if (Stopping) return;
+                    if (string.IsNullOrEmpty(ev.Position)) continue;
+                    var enc = Ttd.TtdPosition.Encode(ev.Position);
+                    if (!seen.Add(enc)) continue;
+                    WriteFolder(enc, MakePath(path, enc), dir,
+                        $"{ev.Type} @ {ev.Position}", null);
+                }
+                break;
+
+            case PathKind.PositionFolder:
+                WriteFile("position.json", MakePath(path, "position.json"), dir);
+                WriteFolder("threads", MakePath(path, "threads"), dir,
+                    "threads at this time position", null);
+                break;
+
+            case PathKind.PositionThreadsFolder:
+                if (info.EncodedPosition != null)
+                {
+                    Store.SeekTo(ResolvePosition(info.EncodedPosition));
+                    foreach (var t in Store.GetThreadsAtCurrentPosition())
+                    {
+                        if (Stopping) return;
+                        var tPath = MakePath(path, t.Id);
+                        WriteFolder(t.Id, tPath, dir,
+                            $"{t.FrameCount} frames at position {ResolvePosition(info.EncodedPosition)}",
+                            t.FrameCount);
+                    }
+                }
+                break;
+
+            case PathKind.PositionThreadFolder:
+                WriteFile("info.json", MakePath(path, "info.json"), dir);
+                WriteFolder("frames", MakePath(path, "frames"), dir, "stack frames", null);
+                break;
+
+            case PathKind.PositionThreadFramesFolder:
+                if (info.EncodedPosition != null && info.ThreadId != null)
+                {
+                    Store.SeekTo(ResolvePosition(info.EncodedPosition));
+                    foreach (var f in Store.GetFramesAtCurrentPosition(info.ThreadId))
+                    {
+                        if (Stopping) return;
+                        WriteFile($"{f.Index}.json", MakePath(path, $"{f.Index}.json"), dir);
+                    }
                 }
                 break;
         }
@@ -189,8 +359,47 @@ public sealed class TtdProvider : ProviderBase
             }, TraceJson.Options),
             PathKind.EventFile when info.Index is int i && i >= 0 && i < Store.Events.Count
                 => JsonSerializer.Serialize(Store.Events[i], TraceJson.Options),
+
+            PathKind.PositionInfoFile when info.EncodedPosition != null
+                => JsonSerializer.Serialize(new
+                {
+                    Encoded = info.EncodedPosition,
+                    Native = ResolvePosition(info.EncodedPosition),
+                }, TraceJson.Options),
+
+            PathKind.PositionThreadInfoFile when info.EncodedPosition != null && info.ThreadId != null
+                => SerializeThreadInfo(info),
+
+            PathKind.PositionFrameFile when info.EncodedPosition != null
+                    && info.ThreadId != null && info.FrameIndex is int fi
+                => SerializeFrame(info, fi),
+
             _ => "",
         };
+    }
+
+    private string SerializeThreadInfo(ParsedPath info)
+    {
+        Store.SeekTo(ResolvePosition(info.EncodedPosition!));
+        var thread = Store.GetThreadsAtCurrentPosition()
+            .FirstOrDefault(t => t.Id.Equals(info.ThreadId!, StringComparison.OrdinalIgnoreCase));
+        return thread != null
+            ? JsonSerializer.Serialize(new
+            {
+                Id = thread.Id,
+                FrameCount = thread.FrameCount,
+                Position = ResolvePosition(info.EncodedPosition!),
+            }, TraceJson.Options)
+            : "{}";
+    }
+
+    private string SerializeFrame(ParsedPath info, int frameIndex)
+    {
+        Store.SeekTo(ResolvePosition(info.EncodedPosition!));
+        var frames = Store.GetFramesAtCurrentPosition(info.ThreadId!);
+        var f = frames.FirstOrDefault(x => x.Index == frameIndex);
+        return f != null
+            ? JsonSerializer.Serialize(f, TraceJson.Options) : "{}";
     }
 
     private void WriteFolder(string name, string itemPath, string directory, string desc, int? count)

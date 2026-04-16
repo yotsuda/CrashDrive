@@ -55,6 +55,88 @@ public sealed class TtdStore : IStore
     public IReadOnlyList<TtdEvent> Events => _events.Value;
     public TtdSummary Summary => _summary.Value;
 
+    // ─── Position navigation ───────────────────────────────────────
+    //
+    // DbgEng maintains a single "current position" per session. Cache it so
+    // we only issue !tt when moving. Callers pass native "major:minor" strings.
+
+    private readonly object _posLock = new();
+    private string? _currentPosition;
+
+    /// <summary>Navigate to a specific TTD position (native "major:minor" string).</summary>
+    public void SeekTo(string position)
+    {
+        lock (_posLock)
+        {
+            if (_currentPosition == position) return;
+            Session.Execute($"!tt {position}");
+            _currentPosition = position;
+        }
+    }
+
+    /// <summary>
+    /// Return threads visible at the current (last-seeked) position.
+    /// Note: the Threads data-model collection is keyed by thread ID, not a
+    /// numeric index. We enumerate via .Select() and then fetch details per ID.
+    /// </summary>
+    public IReadOnlyList<TtdThreadAtPosition> GetThreadsAtCurrentPosition()
+    {
+        var ids = ParseIdList(Session.Dx("@$curprocess.Threads.Select(t => t.Id)", recursion: 1));
+
+        var result = new List<TtdThreadAtPosition>();
+        foreach (var id in ids)
+        {
+            int frameCount = 0;
+            try { frameCount = ParseInt(ExtractScalar(Session.Dx($"@$curprocess.Threads[{id}].Stack.Frames.Count()"))); }
+            catch { }
+            result.Add(new TtdThreadAtPosition { Id = id, FrameCount = frameCount });
+        }
+        return result;
+    }
+
+    /// <summary>Return stack frames for a thread id at the current position.</summary>
+    public IReadOnlyList<TtdFrame> GetFramesAtCurrentPosition(string threadId)
+    {
+        var result = new List<TtdFrame>();
+        int frameCount;
+        try { frameCount = ParseInt(ExtractScalar(Session.Dx($"@$curprocess.Threads[{threadId}].Stack.Frames.Count()"))); }
+        catch { return result; }
+
+        for (int i = 0; i < Math.Min(frameCount, 128); i++)
+        {
+            try
+            {
+                var text = ExtractScalar(Session.Dx($"@$curprocess.Threads[{threadId}].Stack.Frames[{i}]"));
+                result.Add(new TtdFrame { Index = i, Description = text });
+            }
+            catch { }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Parse the multi-line "dx .Select(t => t.Id)" output, extracting the
+    /// right-hand side value of each "    [key] : value" line.
+    /// </summary>
+    private static IReadOnlyList<string> ParseIdList(string dxOutput)
+    {
+        var ids = new List<string>();
+        if (string.IsNullOrWhiteSpace(dxOutput)) return ids;
+        foreach (var rawLine in dxOutput.Split('\n'))
+        {
+            var line = rawLine.TrimEnd('\r');
+            // Child rows are typically indented; they look like:
+            //   "    [0xa098]         : 0xa098"
+            if (!line.StartsWith("    ")) continue;
+            var colonIdx = line.IndexOf(':');
+            if (colonIdx < 0) continue;
+            var value = line[(colonIdx + 1)..].Trim();
+            if (!string.IsNullOrEmpty(value) && !value.StartsWith("Error"))
+                ids.Add(value);
+        }
+        return ids;
+    }
+
     private static readonly object s_loadLock = new();
     private static readonly HashSet<DbgEngSession> s_loadedSessions = new();
 
@@ -209,6 +291,43 @@ public sealed class TtdEvent
     public string Position { get; set; } = "";
     public string Type { get; set; } = "";
     public string Module { get; set; } = "";
+}
+
+public sealed class TtdThreadAtPosition
+{
+    public string Id { get; set; } = "";
+    public int FrameCount { get; set; }
+}
+
+public sealed class TtdFrame
+{
+    public int Index { get; set; }
+    public string Description { get; set; } = "";
+}
+
+/// <summary>PS path-safe encoding of a TTD position. "1CBF:8C1" ↔ "1CBF_8C1".</summary>
+public static class TtdPosition
+{
+    public static string Encode(string nativePosition) => nativePosition.Replace(':', '_');
+    public static string Decode(string encodedPosition) => encodedPosition.Replace('_', ':');
+
+    public static bool IsValid(string encodedPosition)
+    {
+        // Accept "<hex>_<hex>" or "start"/"end" symbolic names.
+        if (encodedPosition is "start" or "end") return true;
+        var idx = encodedPosition.IndexOf('_');
+        if (idx <= 0 || idx >= encodedPosition.Length - 1) return false;
+        return IsHex(encodedPosition[..idx]) && IsHex(encodedPosition[(idx + 1)..]);
+    }
+
+    private static bool IsHex(string s)
+    {
+        if (s.Length == 0) return false;
+        foreach (var ch in s)
+            if (!((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')))
+                return false;
+        return true;
+    }
 }
 
 public sealed class TtdSummary
