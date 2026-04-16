@@ -61,6 +61,10 @@ public sealed class DumpStore : IStore
     public IReadOnlyList<DumpModuleInfo> Modules => _modules.Value;
     public DumpSummary Summary => _summary.Value;
 
+    /// <summary>Access the ClrMD runtime for callers that need direct heap /
+    /// type / object inspection. Null if the dump has no CLR target.</summary>
+    public ClrRuntime? ClrRuntime => _runtime.Value;
+
     // ─── Heap walker (lazy, single-pass) ──────────────────────────
 
     /// <summary>

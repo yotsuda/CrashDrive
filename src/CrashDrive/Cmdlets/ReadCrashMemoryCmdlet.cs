@@ -18,19 +18,19 @@ namespace CrashDrive.Cmdlets;
 [OutputType(typeof(string))]
 public sealed class ReadCrashMemoryCmdlet : PSCmdlet
 {
+    /// <summary>Address to read. Accepts hex (0x...) or decimal.</summary>
+    [Parameter(Mandatory = true, Position = 0)]
+    public string Address { get; set; } = "";
+
     /// <summary>Drive name (e.g. "dump" or "ttd"). If omitted, inferred from the
     /// current PS location.</summary>
-    [Parameter(Position = 0)]
+    [Parameter]
     public string? Drive { get; set; }
 
     /// <summary>TTD only: position to seek to before reading. Accepts native
     /// "8F:1DCE" or path-encoded "8F_1DCE", or the aliases "start" / "end".</summary>
     [Parameter]
     public string? Position { get; set; }
-
-    /// <summary>Address to read. Accepts hex (0x...) or decimal.</summary>
-    [Parameter(Mandatory = true, Position = 1)]
-    public string Address { get; set; } = "";
 
     /// <summary>How many bytes to read. Default 128.</summary>
     [Parameter]
