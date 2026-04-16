@@ -234,9 +234,64 @@ public sealed class TtdProvider : ProviderBase
 
     protected override void GetItem(string path)
     {
+        var info = Parse(NormalizePath(path));
         var parent = GetParentPath(path, null);
         var dir = EnsureDrivePrefix(parent);
-        WriteFolder(Path.GetFileName(path), path, dir, "", null);
+        var name = Path.GetFileName(path);
+
+        switch (info.Kind)
+        {
+            case PathKind.EventFile when info.Index is int ei && ei >= 0 && ei < Store.Events.Count:
+                var ev = Store.Events[ei];
+                WriteItemObject(new Models.TtdEventItem
+                {
+                    Index = ei, Name = name, Position = ev.Position,
+                    Type = ev.Type, Module = ev.Module,
+                    Path = EnsureDrivePrefix(path), Directory = dir,
+                }, path, isContainer: false);
+                break;
+
+            case PathKind.CallFile when info.Module != null && info.Function != null
+                    && info.Index is int ci:
+                var calls = Store.GetCalls(info.Module, info.Function);
+                if (ci >= 0 && ci < calls.Count)
+                {
+                    var c = calls[ci];
+                    WriteItemObject(new Models.TtdCallItem
+                    {
+                        Index = ci, Name = name,
+                        ThreadId = c.ThreadId, TimeStart = c.TimeStart,
+                        TimeEnd = c.TimeEnd, ReturnValue = c.ReturnValue,
+                        Path = EnsureDrivePrefix(path), Directory = dir,
+                    }, path, isContainer: false);
+                }
+                break;
+
+            case PathKind.MemoryAccessFile when info.MemStart != null && info.MemEnd != null
+                    && info.AccessMode != null && info.Index is int mi:
+                var recs = Store.GetMemoryAccesses(info.MemStart, info.MemEnd, info.AccessMode);
+                if (mi >= 0 && mi < recs.Count)
+                {
+                    var r = recs[mi];
+                    WriteItemObject(new Models.TtdMemoryItem
+                    {
+                        Index = mi, Name = name, Position = r.TimeStart,
+                        AccessType = r.AccessType, Address = r.Address, Value = r.Value,
+                        Path = EnsureDrivePrefix(path), Directory = dir,
+                    }, path, isContainer: false);
+                }
+                break;
+
+            case PathKind.Summary or PathKind.Info or PathKind.Timeline
+                or PathKind.PositionInfoFile or PathKind.PositionThreadInfoFile
+                or PathKind.PositionFrameFile:
+                WriteFile(name, path, dir);
+                break;
+
+            default:
+                WriteFolder(name, path, dir, "", null);
+                break;
+        }
     }
 
     // === Children ===

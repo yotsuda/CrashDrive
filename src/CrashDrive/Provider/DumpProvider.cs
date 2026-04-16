@@ -153,9 +153,77 @@ public sealed class DumpProvider : ProviderBase
 
     protected override void GetItem(string path)
     {
+        var info = Parse(NormalizePath(path));
         var parent = GetParentPath(path, null);
         var dir = EnsureDrivePrefix(parent);
-        WriteFolder(Path.GetFileName(path), path, dir, "", null);
+        var name = Path.GetFileName(path);
+
+        switch (info.Kind)
+        {
+            case PathKind.ThreadFolder when info.ThreadId is int tid:
+                var t = Store.Threads.FirstOrDefault(x => x.ManagedThreadId == tid);
+                if (t != null)
+                {
+                    WriteItemObject(new Models.ThreadItem
+                    {
+                        ManagedThreadId = t.ManagedThreadId,
+                        OSThreadId = t.OSThreadId,
+                        GCMode = t.GCMode,
+                        IsAlive = t.IsAlive,
+                        IsFinalizer = t.IsFinalizer,
+                        FrameCount = t.Frames.Count,
+                        ExceptionSummary = t.CurrentException != null
+                            ? $"{t.CurrentException.TypeName}: {t.CurrentException.Message}" : null,
+                        Path = EnsureDrivePrefix(path),
+                        Directory = dir,
+                    }, path, isContainer: true);
+                }
+                break;
+
+            case PathKind.FrameFile when info.ThreadId is int ftid && info.FrameIndex is int fi:
+                var ft = Store.Threads.FirstOrDefault(x => x.ManagedThreadId == ftid);
+                if (ft != null && fi >= 0 && fi < ft.Frames.Count)
+                {
+                    var f = ft.Frames[fi];
+                    WriteItemObject(new Models.FrameItem
+                    {
+                        Index = fi,
+                        Method = f.Method ?? "<unknown>",
+                        Module = f.Module,
+                        Kind = f.Kind,
+                        IpHex = $"0x{f.InstructionPointer:X16}",
+                        Path = EnsureDrivePrefix(path),
+                        Directory = dir,
+                    }, path, isContainer: false);
+                }
+                break;
+
+            case PathKind.ModuleFile when info.ModuleFile != null:
+                var m = Store.Modules.FirstOrDefault(x => Sanitize(x.FileName)
+                    .Equals(info.ModuleFile, StringComparison.OrdinalIgnoreCase));
+                if (m != null)
+                {
+                    WriteItemObject(new Models.ModuleItem
+                    {
+                        Name = m.Name, FileName = m.FileName,
+                        Size = m.Size, ImageBaseHex = $"0x{m.ImageBase:X16}",
+                        IsDynamic = m.IsDynamic,
+                        Path = EnsureDrivePrefix(path),
+                        Directory = dir,
+                    }, path, isContainer: false);
+                }
+                break;
+
+            case PathKind.Summary or PathKind.Info
+                or PathKind.ThreadInfo or PathKind.ThreadStack or PathKind.ThreadException
+                or PathKind.HeapTypeFile:
+                WriteFile(name, path, dir);
+                break;
+
+            default:
+                WriteFolder(name, path, dir, "", null);
+                break;
+        }
     }
 
     // === Children ===
