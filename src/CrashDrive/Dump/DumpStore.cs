@@ -55,6 +55,8 @@ public sealed class DumpStore : IStore
             LazyThreadSafetyMode.ExecutionAndPublication);
         _analyzeOutput = new Lazy<string>(RunAnalyze,
             LazyThreadSafetyMode.ExecutionAndPublication);
+        _stackFrameMethods = new Lazy<Dictionary<ulong, ClrMethod>>(BuildStackFrameMethodCache,
+            LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     public bool HasClr => _target.ClrVersions.Length > 0;
@@ -189,14 +191,50 @@ public sealed class DumpStore : IStore
         catch { return null; }
     }
 
+    // On DumpType.Full the code-heap index is present and
+    // GetMethodByInstructionPointer resolves arbitrary JIT'd IPs. On WithHeap /
+    // Normal dumps the index is absent, so we fall back to a cache built from
+    // the ClrMD stack walker — for stack-frame IPs specifically it can recover
+    // a ClrMethod even when the heap-index lookup returns null. Non-stack IPs
+    // (e.g. arbitrary addresses fed from dbgeng) can't be recovered this way
+    // and will still return null on non-Full dumps.
+    //
+    // Source line resolution is a separate constraint: ClrMethod.ILOffsetMap is
+    // only populated when JIT code-heap metadata is available. So even with a
+    // Method in hand, a Normal dump typically produces "method but no line",
+    // which we surface as null (native backend then has its shot).
+
+    private readonly Lazy<Dictionary<ulong, ClrMethod>> _stackFrameMethods;
+
+    private Dictionary<ulong, ClrMethod> BuildStackFrameMethodCache()
+    {
+        var dict = new Dictionary<ulong, ClrMethod>();
+        var runtime = _runtime.Value;
+        if (runtime == null) return dict;
+        try
+        {
+            foreach (var t in runtime.Threads)
+            {
+                foreach (var f in t.EnumerateStackTrace().Take(64))
+                {
+                    if (f.InstructionPointer == 0 || f.Method == null) continue;
+                    dict[f.InstructionPointer] = f.Method;
+                }
+            }
+        }
+        catch { }
+        return dict;
+    }
+
     private SourceLocation? TryManagedSourceLocation(ulong ip)
     {
         var runtime = _runtime.Value;
         if (runtime == null) return null;
 
-        ClrMethod? method;
+        ClrMethod? method = null;
         try { method = runtime.GetMethodByInstructionPointer(ip); }
-        catch { return null; }
+        catch { }
+        method ??= _stackFrameMethods.Value.TryGetValue(ip, out var cached) ? cached : null;
         if (method == null) return null;
 
         // ILOffsetMap entries associate native IP ranges with IL offsets.
