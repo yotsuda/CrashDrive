@@ -39,18 +39,27 @@ LONG DESCRIPTION
   Dump ドライブの構造
 
     dump:\
-    +-- summary.json      概要 (アーキテクチャ、CLR 版、スレッド数など)
-    +-- analyze.txt       !analyze -v 出力 (dbgeng、キャッシュ済み)
-    +-- threads\          スレッド一覧
-    |   +-- <managed-id>\ マネージドスレッド ID
-    |       +-- info.json
-    |       +-- registers.txt
-    |       +-- frames\   スタックフレーム
-    |           +-- <n>.json
-    +-- modules\          ロード済みモジュール (native + managed の結合)
-    +-- heap\             GC ヒープ
-        +-- types\        型別インスタンス統計
-        +-- objects\      アドレス指定のオブジェクト (Get-CrashObject 経由)
+    +-- triage.md               アンサー・ファースト要約 (例外、スレッド分類、トップモジュール)
+    +-- summary.json            概要 (アーキテクチャ、CLR 版、スレッド数など)
+    +-- analyze.txt             !analyze -v 出力 (dbgeng、キャッシュ済み)
+    +-- threads\                スレッド一覧
+    |   +-- <managed-id>\       マネージドスレッド ID
+    |   |   +-- info.json
+    |   |   +-- stack.txt
+    |   |   +-- registers.txt
+    |   |   +-- exception.json  (存在するときのみ)
+    |   |   +-- frames\         スタックフレーム
+    |   |       +-- <n>.json
+    |   +-- with-exception\     CurrentException を持つスレッドのみ (sin thetic)
+    |   |   +-- <managed-id>\   → 通常の threads\<id>\ ツリーへリンク
+    |   +-- by-state\           状態分類 (synthetic)
+    |       +-- finalizer\      IsFinalizer
+    |       +-- gc\             IsGC
+    |       +-- dead\           !IsAlive
+    +-- modules\                ロード済みモジュール (native + managed の結合)
+    +-- heap\                   GC ヒープ
+        +-- types\              型別インスタンス統計
+        +-- objects\            アドレス指定のオブジェクト (Get-CrashObject 経由)
 
   TTD ドライブの構造
 
@@ -113,7 +122,8 @@ LONG DESCRIPTION
     # ダンプの概要
     Get-Content dump:\summary.json | ConvertFrom-Json
 
-    # TTD の分類済みトリアージ (Markdown)
+    # Dump / TTD どちらもアンサー・ファースト要約を持つ
+    Get-Content dump:\triage.md
     Get-Content ttd:\triage.md
 
     # 特定フレームの詳細
