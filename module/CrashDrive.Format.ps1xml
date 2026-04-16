@@ -23,8 +23,8 @@
       <TableControl>
         <TableHeaders>
           <TableColumnHeader><Label>Mode</Label><Width>5</Width></TableColumnHeader>
-          <TableColumnHeader><Label>Count</Label><Width>8</Width><Alignment>Right</Alignment></TableColumnHeader>
-          <TableColumnHeader><Label>Name</Label><Width>32</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Count</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Name</Label></TableColumnHeader>
           <TableColumnHeader><Label>Description</Label></TableColumnHeader>
         </TableHeaders>
         <TableRowEntries>
@@ -54,10 +54,10 @@
       </GroupBy>
       <TableControl>
         <TableHeaders>
-          <TableColumnHeader><Label>Seq</Label><Width>6</Width><Alignment>Right</Alignment></TableColumnHeader>
-          <TableColumnHeader><Label>Type</Label><Width>10</Width></TableColumnHeader>
-          <TableColumnHeader><Label>Depth</Label><Width>6</Width><Alignment>Right</Alignment></TableColumnHeader>
-          <TableColumnHeader><Label>Line</Label><Width>6</Width><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Seq</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Type</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Depth</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Line</Label><Alignment>Right</Alignment></TableColumnHeader>
           <TableColumnHeader><Label>Summary</Label></TableColumnHeader>
         </TableHeaders>
         <TableRowEntries>
@@ -84,11 +84,11 @@
       </GroupBy>
       <TableControl>
         <TableHeaders>
-          <TableColumnHeader><Label>#</Label><Width>4</Width><Alignment>Right</Alignment></TableColumnHeader>
-          <TableColumnHeader><Label>Seq</Label><Width>6</Width><Alignment>Right</Alignment></TableColumnHeader>
-          <TableColumnHeader><Label>Line</Label><Width>6</Width><Alignment>Right</Alignment></TableColumnHeader>
-          <TableColumnHeader><Label>Exception</Label><Width>20</Width></TableColumnHeader>
-          <TableColumnHeader><Label>Function</Label><Width>20</Width></TableColumnHeader>
+          <TableColumnHeader><Label>#</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Seq</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Line</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Exception</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Function</Label></TableColumnHeader>
           <TableColumnHeader><Label>Message</Label></TableColumnHeader>
         </TableHeaders>
         <TableRowEntries>
@@ -116,10 +116,10 @@
       </GroupBy>
       <TableControl>
         <TableHeaders>
-          <TableColumnHeader><Label>MgdId</Label><Width>6</Width><Alignment>Right</Alignment></TableColumnHeader>
-          <TableColumnHeader><Label>OSId</Label><Width>6</Width><Alignment>Right</Alignment></TableColumnHeader>
-          <TableColumnHeader><Label>Frames</Label><Width>7</Width><Alignment>Right</Alignment></TableColumnHeader>
-          <TableColumnHeader><Label>Flags</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>MgdId</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>OSId</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Frames</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Flags</Label></TableColumnHeader>
           <TableColumnHeader><Label>Exception</Label></TableColumnHeader>
         </TableHeaders>
         <TableRowEntries>
@@ -146,9 +146,9 @@
       </GroupBy>
       <TableControl>
         <TableHeaders>
-          <TableColumnHeader><Label>#</Label><Width>4</Width><Alignment>Right</Alignment></TableColumnHeader>
-          <TableColumnHeader><Label>Kind</Label><Width>10</Width></TableColumnHeader>
-          <TableColumnHeader><Label>IP</Label><Width>18</Width></TableColumnHeader>
+          <TableColumnHeader><Label>#</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Kind</Label></TableColumnHeader>
+          <TableColumnHeader><Label>IP</Label></TableColumnHeader>
           <TableColumnHeader><Label>Method</Label></TableColumnHeader>
         </TableHeaders>
         <TableRowEntries>
@@ -174,8 +174,8 @@
       </GroupBy>
       <TableControl>
         <TableHeaders>
-          <TableColumnHeader><Label>Name</Label><Width>40</Width></TableColumnHeader>
-          <TableColumnHeader><Label>Size</Label><Width>10</Width><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Name</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Size</Label><Alignment>Right</Alignment></TableColumnHeader>
           <TableColumnHeader><Label>ImageBase</Label></TableColumnHeader>
         </TableHeaders>
         <TableRowEntries>
