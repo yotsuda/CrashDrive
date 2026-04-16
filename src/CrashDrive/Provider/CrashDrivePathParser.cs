@@ -55,6 +55,11 @@ public enum CrashPathType
     ExceptionContextFile,       // exceptions\<index>\context.json
     ExceptionStackFile,         // exceptions\<index>\stack.txt
 
+    // TTD-specific
+    TtdEventsFolder,            // ttd-events\
+    TtdEventFile,               // ttd-events\<index>.json
+    TtdTimelineFile,            // timeline.json
+
     // Dump-specific
     ThreadsFolder,              // threads\
     ThreadFolder,               // threads\<id>
@@ -95,6 +100,7 @@ public sealed class CrashPathInfo
         CrashPathType.ThreadFolder => true,
         CrashPathType.ThreadFramesFolder => true,
         CrashPathType.ModulesFolder => true,
+        CrashPathType.TtdEventsFolder => true,
         _ => false,
     };
 }
@@ -127,6 +133,8 @@ public static class CrashPathParser
                 "exceptions" => new CrashPathInfo { Type = CrashPathType.ExceptionsFolder, Segments = segments },
                 "threads" => new CrashPathInfo { Type = CrashPathType.ThreadsFolder, Segments = segments },
                 "modules" => new CrashPathInfo { Type = CrashPathType.ModulesFolder, Segments = segments },
+                "ttd-events" => new CrashPathInfo { Type = CrashPathType.TtdEventsFolder, Segments = segments },
+                "timeline.json" => new CrashPathInfo { Type = CrashPathType.TtdTimelineFile, Segments = segments },
                 _ => new CrashPathInfo { Type = CrashPathType.Invalid, Segments = segments },
             };
         }
@@ -139,6 +147,7 @@ public static class CrashPathParser
             "exceptions" => ParseExceptions(segments),
             "threads" => ParseThreads(segments),
             "modules" => ParseModules(segments),
+            "ttd-events" => ParseTtdEvents(segments),
             _ => new CrashPathInfo { Type = CrashPathType.Invalid, Segments = segments },
         };
     }
@@ -168,6 +177,13 @@ public static class CrashPathParser
             return new() { Type = CrashPathType.FrameFile, Segments = segments, ThreadId = tid, FrameIndex = frameN };
         }
         return Invalid(segments);
+    }
+
+    private static CrashPathInfo ParseTtdEvents(string[] segments)
+    {
+        if (segments.Length != 2) return Invalid(segments);
+        if (!TryParseSeqFile(segments[1], out var seq)) return Invalid(segments);
+        return new() { Type = CrashPathType.TtdEventFile, Segments = segments, Seq = seq };
     }
 
     private static CrashPathInfo ParseModules(string[] segments)

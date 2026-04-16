@@ -10,6 +10,9 @@ public enum StoreKind
 
     /// <summary>Windows minidump / .NET crash dump (parsed via ClrMD).</summary>
     Dump,
+
+    /// <summary>Time Travel Debugging trace (.run) opened via DbgEng.</summary>
+    Ttd,
 }
 
 /// <summary>

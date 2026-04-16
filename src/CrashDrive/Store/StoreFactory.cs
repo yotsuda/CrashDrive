@@ -1,5 +1,6 @@
 using CrashDrive.Dump;
 using CrashDrive.Trace;
+using CrashDrive.Ttd;
 
 namespace CrashDrive.Store;
 
@@ -24,6 +25,7 @@ public static class StoreFactory
         {
             StoreKind.Trace => new TraceStore(path),
             StoreKind.Dump => new DumpStore(path, symbolPath),
+            StoreKind.Ttd => new TtdStore(path, symbolPath),
             _ => throw new NotSupportedException($"Unsupported file kind: {kind}"),
         };
     }
@@ -35,6 +37,7 @@ public static class StoreFactory
         // Fast-path by extension
         if (ext is ".jsonl" or ".json" or ".ndjson") return StoreKind.Trace;
         if (ext is ".dmp" or ".mdmp" or ".hdmp") return StoreKind.Dump;
+        if (ext is ".run") return StoreKind.Ttd;
 
         // Fallback: peek at magic bytes
         try

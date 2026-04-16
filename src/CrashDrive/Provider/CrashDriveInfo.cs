@@ -2,6 +2,7 @@ using System.Management.Automation;
 using CrashDrive.Store;
 using CrashDrive.Trace;
 using CrashDrive.Dump;
+using CrashDrive.Ttd;
 
 namespace CrashDrive.Provider;
 
@@ -17,6 +18,7 @@ public sealed class CrashDriveInfo : PSDriveInfo
 
     public TraceStore? AsTrace => Store as TraceStore;
     public DumpStore? AsDump => Store as DumpStore;
+    public TtdStore? AsTtd => Store as TtdStore;
 
     /// <summary>
     /// Convenience accessor used by trace-specific code paths.

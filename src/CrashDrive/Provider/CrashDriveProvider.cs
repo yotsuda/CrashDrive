@@ -182,6 +182,18 @@ public sealed class CrashDriveProvider : NavigationCmdletProvider, IContentCmdle
                     yield return ("threads", true);
                     yield return ("modules", true);
                 }
+                else if (Drive.Store.Kind == Store.StoreKind.Ttd)
+                {
+                    yield return ("info.json", false);
+                    yield return ("timeline.json", false);
+                    yield return ("ttd-events", true);
+                }
+                break;
+
+            case CrashPathType.TtdEventsFolder:
+                if (Drive.AsTtd is { } ttdEv)
+                    for (int i = 0; i < ttdEv.Events.Count; i++)
+                        yield return ($"{i}.json", false);
                 break;
 
             case CrashPathType.ThreadsFolder:
@@ -277,6 +289,27 @@ public sealed class CrashDriveProvider : NavigationCmdletProvider, IContentCmdle
                         $"threads at time of dump", rd.Summary.ThreadCount);
                     WriteFolder(path, "modules", MakePath(path, "modules"), directory,
                         "loaded modules", rd.Summary.ModuleCount);
+                }
+                else if (Drive.AsTtd is { } rt)
+                {
+                    WriteFile("info.json", MakePath(path, "info.json"), directory);
+                    WriteFile("timeline.json", MakePath(path, "timeline.json"), directory);
+                    WriteFolder(path, "ttd-events", MakePath(path, "ttd-events"), directory,
+                        "notable events during recording", rt.Summary.EventCount);
+                }
+                break;
+
+            case CrashPathType.TtdEventsFolder:
+                if (Drive.AsTtd is { } ttdEvDump)
+                {
+                    for (int i = 0; i < ttdEvDump.Events.Count; i++)
+                    {
+                        if (Stopping) return;
+                        var ev = ttdEvDump.Events[i];
+                        var ePath = MakePath(path, $"{i}.json");
+                        // Use existing FileItem for simple display
+                        WriteFile($"{i}.json", ePath, directory);
+                    }
                 }
                 break;
 
@@ -462,11 +495,25 @@ public sealed class CrashDriveProvider : NavigationCmdletProvider, IContentCmdle
                     return JsonSerializer.Serialize(Drive.Trace.Summary, TraceJson.Options);
                 if (Drive.AsDump is { } dSum)
                     return JsonSerializer.Serialize(dSum.Summary, TraceJson.Options);
+                if (Drive.AsTtd is { } tSum)
+                    return JsonSerializer.Serialize(tSum.Summary, TraceJson.Options);
                 return "{}";
 
             case CrashPathType.DumpInfoFile:
                 if (Drive.AsDump is { } dInfo)
                     return JsonSerializer.Serialize(dInfo.Summary, TraceJson.Options);
+                if (Drive.AsTtd is { } tInfo)
+                    return JsonSerializer.Serialize(tInfo.Summary, TraceJson.Options);
+                return "{}";
+
+            case CrashPathType.TtdTimelineFile:
+                if (Drive.AsTtd is { } tTl)
+                    return JsonSerializer.Serialize(new { tTl.Summary.LifetimeStart, tTl.Summary.LifetimeEnd, EventCount = tTl.Summary.EventCount }, TraceJson.Options);
+                return "{}";
+
+            case CrashPathType.TtdEventFile:
+                if (Drive.AsTtd is { } tEv && info.Seq is int idx && idx >= 0 && idx < tEv.Events.Count)
+                    return JsonSerializer.Serialize(tEv.Events[idx], TraceJson.Options);
                 return "{}";
 
             case CrashPathType.ThreadInfoFile:

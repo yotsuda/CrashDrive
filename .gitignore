@@ -11,3 +11,6 @@ Thumbs.db
 scratch/*.jsonl
 scratch/*.log
 scratch/*.dmp
+scratch/ttd/
+scratch/*.out
+scratch/*.run
