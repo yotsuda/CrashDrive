@@ -28,6 +28,7 @@ Related: splash - https://github.com/yotsuda/splash (npm: @ytsuda/splash)
         'Read-CrashMemory'
         'Get-CrashObject'
         'Get-CrashLocalVariable'
+        'Invoke-CrashCommand'
     )
     FunctionsToExport    = @()
     AliasesToExport      = @()
