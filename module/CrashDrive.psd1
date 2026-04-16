@@ -10,7 +10,6 @@
 
     CmdletsToExport      = @(
         'New-CrashDrive'
-        'Invoke-CrashCapture'
         'Enable-CrashEditorFollow'
         'Disable-CrashEditorFollow'
         'Read-CrashMemory'
