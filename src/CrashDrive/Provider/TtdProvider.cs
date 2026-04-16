@@ -70,6 +70,12 @@ public sealed class TtdProvider : ProviderBase
         PositionThreadInfoFile,                     // positions/<pos>/threads/<tid>/info.json
         PositionThreadFramesFolder,                 // positions/<pos>/threads/<tid>/frames/
         PositionFrameFile,                          // positions/<pos>/threads/<tid>/frames/<n>.json
+
+        CallsFolder,                                // calls/
+        CallsModuleFolder,                          // calls/<module>/
+        CallsFunctionFolder,                        // calls/<module>/<function>/
+        CallFile,                                   // calls/<module>/<function>/<n>.json
+
         Invalid,
     }
 
@@ -79,7 +85,9 @@ public sealed class TtdProvider : ProviderBase
         int? Index = null,
         string? EncodedPosition = null,
         string? ThreadId = null,
-        int? FrameIndex = null);
+        int? FrameIndex = null,
+        string? Module = null,
+        string? Function = null);
 
     private ParsedPath Parse(string path)
     {
@@ -96,6 +104,7 @@ public sealed class TtdProvider : ProviderBase
                 "timeline.json" => new(PathKind.Timeline, segs),
                 "ttd-events" => new(PathKind.EventsFolder, segs),
                 "positions" => new(PathKind.PositionsFolder, segs),
+                "calls" => new(PathKind.CallsFolder, segs),
                 _ => new(PathKind.Invalid, segs),
             };
         }
@@ -139,6 +148,17 @@ public sealed class TtdProvider : ProviderBase
             }
         }
 
+        if (head == "calls")
+        {
+            // calls/<module>[/<function>[/<n>.json]]
+            if (segs.Length == 2) return new(PathKind.CallsModuleFolder, segs, Module: segs[1]);
+            if (segs.Length == 3) return new(PathKind.CallsFunctionFolder, segs, Module: segs[1], Function: segs[2]);
+            if (segs.Length == 4
+                && segs[3].EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(segs[3][..^5], out var callIdx))
+                return new(PathKind.CallFile, segs, Module: segs[1], Function: segs[2], Index: callIdx);
+        }
+
         return new(PathKind.Invalid, segs);
     }
 
@@ -162,7 +182,9 @@ public sealed class TtdProvider : ProviderBase
             PathKind.Root or PathKind.EventsFolder or
             PathKind.PositionsFolder or PathKind.PositionFolder or
             PathKind.PositionThreadsFolder or PathKind.PositionThreadFolder or
-            PathKind.PositionThreadFramesFolder => true,
+            PathKind.PositionThreadFramesFolder or
+            PathKind.CallsFolder or PathKind.CallsModuleFolder or
+            PathKind.CallsFunctionFolder => true,
             _ => false,
         };
     }
@@ -259,6 +281,21 @@ public sealed class TtdProvider : ProviderBase
                         yield return ($"{f.Index}.json", false);
                 }
                 break;
+
+            case PathKind.CallsFolder:
+                // Can't enumerate — user specifies module explicitly. No children.
+                break;
+            case PathKind.CallsModuleFolder:
+                // Can't enumerate functions — user specifies function explicitly. No children.
+                break;
+            case PathKind.CallsFunctionFolder:
+                if (info.Module != null && info.Function != null)
+                {
+                    var calls = Store.GetCalls(info.Module, info.Function);
+                    for (int i = 0; i < calls.Count; i++)
+                        yield return ($"{i}.json", false);
+                }
+                break;
         }
     }
 
@@ -275,6 +312,20 @@ public sealed class TtdProvider : ProviderBase
                     "notable events during recording", Store.Summary.EventCount);
                 WriteFolder("positions", MakePath(path, "positions"), dir,
                     "navigable time positions", null);
+                WriteFolder("calls", MakePath(path, "calls"), dir,
+                    "query calls to specific functions: calls\\<module>\\<function>\\", null);
+                break;
+
+            case PathKind.CallsFunctionFolder:
+                if (info.Module != null && info.Function != null)
+                {
+                    var calls = Store.GetCalls(info.Module, info.Function);
+                    for (int i = 0; i < calls.Count; i++)
+                    {
+                        if (Stopping) return;
+                        WriteFile($"{i}.json", MakePath(path, $"{i}.json"), dir);
+                    }
+                }
                 break;
 
             case PathKind.EventsFolder:
@@ -374,8 +425,19 @@ public sealed class TtdProvider : ProviderBase
                     && info.ThreadId != null && info.FrameIndex is int fi
                 => SerializeFrame(info, fi),
 
+            PathKind.CallFile when info.Module != null && info.Function != null
+                    && info.Index is int callIdx
+                => SerializeCall(info.Module, info.Function, callIdx),
+
             _ => "",
         };
+    }
+
+    private string SerializeCall(string module, string function, int index)
+    {
+        var calls = Store.GetCalls(module, function);
+        if (index < 0 || index >= calls.Count) return "{}";
+        return JsonSerializer.Serialize(calls[index], TraceJson.Options);
     }
 
     private string SerializeThreadInfo(ParsedPath info)

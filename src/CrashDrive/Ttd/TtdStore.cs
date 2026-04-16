@@ -94,6 +94,57 @@ public sealed class TtdStore : IStore
         return result;
     }
 
+    /// <summary>
+    /// Execute TTD.Calls("module!function") and return structured call records.
+    /// Each record spans a time range (entry → exit) and carries argument registers
+    /// plus the return value.
+    /// </summary>
+    public IReadOnlyList<TtdCall> GetCalls(string module, string function)
+    {
+        var result = new List<TtdCall>();
+        var functionFullName = $"{module}!{function}";
+
+        int count;
+        try
+        {
+            count = ParseInt(ExtractScalar(
+                Session.Dx($"@$cursession.TTD.Calls(\"{functionFullName}\").Count()")));
+        }
+        catch { return result; }
+
+        if (count == 0) return result;
+
+        for (int i = 0; i < Math.Min(count, 500); i++)
+        {
+            try
+            {
+                var call = new TtdCall
+                {
+                    Index = i,
+                    Function = functionFullName,
+                    ThreadId = ExtractScalar(Session.Dx(
+                        $"@$cursession.TTD.Calls(\"{functionFullName}\")[{i}].ThreadId")),
+                    TimeStart = ExtractScalar(Session.Dx(
+                        $"@$cursession.TTD.Calls(\"{functionFullName}\")[{i}].TimeStart")),
+                    TimeEnd = ExtractScalar(Session.Dx(
+                        $"@$cursession.TTD.Calls(\"{functionFullName}\")[{i}].TimeEnd")),
+                    FunctionAddress = ExtractScalar(Session.Dx(
+                        $"@$cursession.TTD.Calls(\"{functionFullName}\")[{i}].FunctionAddress")),
+                    ReturnAddress = ExtractScalar(Session.Dx(
+                        $"@$cursession.TTD.Calls(\"{functionFullName}\")[{i}].ReturnAddress")),
+                    ReturnValue = ExtractScalar(Session.Dx(
+                        $"@$cursession.TTD.Calls(\"{functionFullName}\")[{i}].ReturnValue")),
+                };
+                // Parameters — iterate via .Select()
+                call.Parameters = ParseIdList(Session.Dx(
+                    $"@$cursession.TTD.Calls(\"{functionFullName}\")[{i}].Parameters.Select(p => p)", recursion: 1));
+                result.Add(call);
+            }
+            catch { /* skip malformed */ }
+        }
+        return result;
+    }
+
     /// <summary>Return stack frames for a thread id at the current position.</summary>
     public IReadOnlyList<TtdFrame> GetFramesAtCurrentPosition(string threadId)
     {
@@ -303,6 +354,19 @@ public sealed class TtdFrame
 {
     public int Index { get; set; }
     public string Description { get; set; } = "";
+}
+
+public sealed class TtdCall
+{
+    public int Index { get; set; }
+    public string Function { get; set; } = "";
+    public string ThreadId { get; set; } = "";
+    public string TimeStart { get; set; } = "";
+    public string TimeEnd { get; set; } = "";
+    public string FunctionAddress { get; set; } = "";
+    public string ReturnAddress { get; set; } = "";
+    public string ReturnValue { get; set; } = "";
+    public IReadOnlyList<string> Parameters { get; set; } = [];
 }
 
 /// <summary>PS path-safe encoding of a TTD position. "1CBF:8C1" ↔ "1CBF_8C1".</summary>
