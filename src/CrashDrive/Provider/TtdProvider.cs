@@ -302,10 +302,60 @@ public sealed class TtdProvider : ProviderBase
                 WriteFile(name, path, dir);
                 break;
 
+            case PathKind.PositionFolder when info.EncodedPosition != null:
+                WriteFolder(name, path, dir, PositionDescription(info.EncodedPosition), null);
+                break;
+
+            case PathKind.PositionThreadFolder when info.EncodedPosition != null && info.ThreadId != null:
+                Store.SeekTo(ResolvePosition(info.EncodedPosition));
+                var tCount = Store.GetThreadsAtCurrentPosition()
+                    .FirstOrDefault(x => x.Id.Equals(info.ThreadId, StringComparison.OrdinalIgnoreCase))?.FrameCount ?? 0;
+                WriteFolder(name, path, dir,
+                    $"{tCount} frames at position {ResolvePosition(info.EncodedPosition)}", tCount);
+                break;
+
+            case PathKind.EventsFolder:
+                WriteFolder(name, path, dir, "notable events during recording", Store.Summary.EventCount);
+                break;
+
             default:
                 WriteFolder(name, path, dir, "", null);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Extract module short-names (without path/extension) from ModuleLoaded events.
+    /// Used to enumerate calls\&lt;module&gt;\ — so users/AI can discover which
+    /// modules' functions are queryable.
+    /// </summary>
+    private IEnumerable<string> GetLoadedModuleNames()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var ev in Store.Events)
+        {
+            if (ev.Type != "ModuleLoaded" || string.IsNullOrEmpty(ev.Module)) continue;
+            // ev.Module text looks like: "Module C:\WINDOWS\System32\bcrypt.dll at address 0X... with size ..."
+            var text = ev.Module;
+            var startIdx = text.IndexOf(' ');
+            if (startIdx < 0) continue;
+            var atIdx = text.IndexOf(" at ", startIdx, StringComparison.Ordinal);
+            if (atIdx < 0) continue;
+            var fullPath = text[(startIdx + 1)..atIdx].Trim();
+            var fileName = System.IO.Path.GetFileNameWithoutExtension(fullPath);
+            if (!string.IsNullOrEmpty(fileName) && seen.Add(fileName))
+                yield return fileName;
+        }
+    }
+
+    private string PositionDescription(string encodedPosition)
+    {
+        if (encodedPosition == "start") return $"Lifetime start ({Store.Summary.LifetimeStart})";
+        if (encodedPosition == "end") return $"Lifetime end ({Store.Summary.LifetimeEnd})";
+        // Look up event at this position
+        var native = Ttd.TtdPosition.Decode(encodedPosition);
+        var ev = Store.Events.FirstOrDefault(e => e.Position == native);
+        return ev != null ? $"{ev.Type} @ {ev.Position}" : "";
     }
 
     // === Children ===
@@ -393,10 +443,12 @@ public sealed class TtdProvider : ProviderBase
                 break;
 
             case PathKind.CallsFolder:
-                // Can't enumerate — user specifies module explicitly. No children.
+                // Enumerate modules known to have loaded from ModuleLoaded events.
+                foreach (var mod in GetLoadedModuleNames())
+                    yield return (mod, true);
                 break;
             case PathKind.CallsModuleFolder:
-                // Can't enumerate functions — user specifies function explicitly. No children.
+                // Functions can't be enumerated (too many); user specifies by name.
                 break;
             case PathKind.CallsFunctionFolder:
                 if (info.Module != null && info.Function != null)
@@ -445,6 +497,16 @@ public sealed class TtdProvider : ProviderBase
                     "query calls to specific functions: calls\\<module>\\<function>\\", null);
                 WriteFolder("memory", MakePath(path, "memory"), dir,
                     "memory access history: memory\\<start>_<end>\\{writes,reads,rw}\\", null);
+                break;
+
+            case PathKind.CallsFolder:
+                foreach (var mod in GetLoadedModuleNames())
+                {
+                    if (Stopping) return;
+                    var mPath = MakePath(path, mod);
+                    WriteFolder(mod, mPath, dir,
+                        "enter a function name as sub-folder (e.g. calls\\" + mod + "\\SomeFunction)", null);
+                }
                 break;
 
             case PathKind.CallsFunctionFolder:
