@@ -1,51 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Configuration>
+  <SelectionSets>
+    <SelectionSet>
+      <Name>CrashDriveEntries</Name>
+      <Types>
+        <TypeName>CrashDrive.Models.FolderItem</TypeName>
+        <TypeName>CrashDrive.Models.FileItem</TypeName>
+      </Types>
+    </SelectionSet>
+  </SelectionSets>
   <ViewDefinitions>
 
+    <!-- Unified folder+file listing: Mode column distinguishes via 'd' / '-' -->
     <View>
-      <Name>FolderItem</Name>
+      <Name>CrashDriveEntry</Name>
       <ViewSelectedBy>
-        <TypeName>CrashDrive.Models.FolderItem</TypeName>
+        <SelectionSetName>CrashDriveEntries</SelectionSetName>
       </ViewSelectedBy>
       <GroupBy>
         <PropertyName>Directory</PropertyName>
       </GroupBy>
       <TableControl>
         <TableHeaders>
-          <TableColumnHeader><Label>Name</Label><Width>24</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Mode</Label><Width>5</Width></TableColumnHeader>
           <TableColumnHeader><Label>Count</Label><Width>8</Width><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Name</Label><Width>32</Width></TableColumnHeader>
           <TableColumnHeader><Label>Description</Label></TableColumnHeader>
         </TableHeaders>
         <TableRowEntries>
           <TableRowEntry>
             <TableColumnItems>
+              <TableColumnItem>
+                <ScriptBlock>if ($_ -is [CrashDrive.Models.FolderItem]) { 'd----' } else { '-a---' }</ScriptBlock>
+              </TableColumnItem>
+              <TableColumnItem>
+                <ScriptBlock>if ($_ -is [CrashDrive.Models.FolderItem]) { $_.Count } else { $null }</ScriptBlock>
+              </TableColumnItem>
               <TableColumnItem><PropertyName>Name</PropertyName></TableColumnItem>
-              <TableColumnItem><PropertyName>Count</PropertyName></TableColumnItem>
               <TableColumnItem><PropertyName>Description</PropertyName></TableColumnItem>
-            </TableColumnItems>
-          </TableRowEntry>
-        </TableRowEntries>
-      </TableControl>
-    </View>
-
-    <View>
-      <Name>FileItem</Name>
-      <ViewSelectedBy>
-        <TypeName>CrashDrive.Models.FileItem</TypeName>
-      </ViewSelectedBy>
-      <GroupBy>
-        <PropertyName>Directory</PropertyName>
-      </GroupBy>
-      <TableControl>
-        <TableHeaders>
-          <TableColumnHeader><Label>Name</Label><Width>24</Width></TableColumnHeader>
-          <TableColumnHeader><Label>Length</Label><Width>10</Width><Alignment>Right</Alignment></TableColumnHeader>
-        </TableHeaders>
-        <TableRowEntries>
-          <TableRowEntry>
-            <TableColumnItems>
-              <TableColumnItem><PropertyName>Name</PropertyName></TableColumnItem>
-              <TableColumnItem><PropertyName>Length</PropertyName></TableColumnItem>
             </TableColumnItems>
           </TableRowEntry>
         </TableRowEntries>
