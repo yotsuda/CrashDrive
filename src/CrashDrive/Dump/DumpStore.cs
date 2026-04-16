@@ -58,6 +58,64 @@ public sealed class DumpStore : IStore
     public IReadOnlyList<DumpModuleInfo> Modules => _modules.Value;
     public DumpSummary Summary => _summary.Value;
 
+    // ─── Heap walker (lazy, single-pass) ──────────────────────────
+
+    /// <summary>
+    /// Returns per-type instance stats from the GC heap. Computed once via a
+    /// full heap enumeration, then cached. Sorted by total bytes descending.
+    /// </summary>
+    public IReadOnlyList<DumpTypeStats> HeapTypes
+    {
+        get
+        {
+            // Lazy-init here since we want it depending on _runtime.Value
+            if (_heapTypesCache != null) return _heapTypesCache;
+            lock (_heapLock)
+            {
+                if (_heapTypesCache != null) return _heapTypesCache;
+                _heapTypesCache = BuildHeapTypes();
+                return _heapTypesCache;
+            }
+        }
+    }
+
+    private readonly object _heapLock = new();
+    private IReadOnlyList<DumpTypeStats>? _heapTypesCache;
+
+    private IReadOnlyList<DumpTypeStats> BuildHeapTypes()
+    {
+        var runtime = _runtime.Value;
+        if (runtime == null) return [];
+
+        var agg = new Dictionary<string, (int Count, long Bytes)>(StringComparer.Ordinal);
+        try
+        {
+            foreach (var obj in runtime.Heap.EnumerateObjects())
+            {
+                var name = obj.Type?.Name ?? "<unknown>";
+                var size = (long)obj.Size;
+                if (agg.TryGetValue(name, out var v))
+                    agg[name] = (v.Count + 1, v.Bytes + size);
+                else
+                    agg[name] = (1, size);
+            }
+        }
+        catch
+        {
+            // Heap walk can fail on partial dumps — return what we got.
+        }
+
+        return agg
+            .Select(kv => new DumpTypeStats
+            {
+                TypeName = kv.Key,
+                InstanceCount = kv.Value.Count,
+                TotalBytes = kv.Value.Bytes,
+            })
+            .OrderByDescending(s => s.TotalBytes)
+            .ToList();
+    }
+
     private ClrRuntime? CreateRuntime()
     {
         var clr = _target.ClrVersions.FirstOrDefault();
@@ -201,4 +259,11 @@ public sealed class DumpExceptionInfo
     public string TypeName { get; set; } = "";
     public string Message { get; set; } = "";
     public int HResult { get; set; }
+}
+
+public sealed class DumpTypeStats
+{
+    public string TypeName { get; set; } = "";
+    public int InstanceCount { get; set; }
+    public long TotalBytes { get; set; }
 }

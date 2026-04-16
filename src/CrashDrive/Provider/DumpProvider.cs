@@ -64,8 +64,10 @@ public sealed class DumpProvider : ProviderBase
     private enum PathKind
     {
         Root, Summary, Info,
-        ThreadsFolder, ThreadFolder, ThreadInfo, ThreadStack, ThreadFramesFolder, FrameFile,
+        ThreadsFolder, ThreadFolder, ThreadInfo, ThreadStack, ThreadException,
+        ThreadFramesFolder, FrameFile,
         ModulesFolder, ModuleFile,
+        HeapFolder, HeapTypesFolder, HeapTypeFile,
         Invalid,
     }
 
@@ -74,7 +76,8 @@ public sealed class DumpProvider : ProviderBase
         string[] Segments,
         int? ThreadId = null,
         int? FrameIndex = null,
-        string? ModuleFile = null);
+        string? ModuleFile = null,
+        string? TypeName = null);
 
     private ParsedPath Parse(string path)
     {
@@ -90,6 +93,7 @@ public sealed class DumpProvider : ProviderBase
                 "info.json" => new(PathKind.Info, segs),
                 "threads" => new(PathKind.ThreadsFolder, segs),
                 "modules" => new(PathKind.ModulesFolder, segs),
+                "heap" => new(PathKind.HeapFolder, segs),
                 _ => new(PathKind.Invalid, segs),
             };
         }
@@ -104,6 +108,7 @@ public sealed class DumpProvider : ProviderBase
                 {
                     "info.json" => new(PathKind.ThreadInfo, segs, ThreadId: tid),
                     "stack.txt" => new(PathKind.ThreadStack, segs, ThreadId: tid),
+                    "exception.json" => new(PathKind.ThreadException, segs, ThreadId: tid),
                     "frames" => new(PathKind.ThreadFramesFolder, segs, ThreadId: tid),
                     _ => new(PathKind.Invalid, segs),
                 };
@@ -115,6 +120,15 @@ public sealed class DumpProvider : ProviderBase
         if (head == "modules" && segs.Length == 2
             && segs[1].EndsWith(".json", StringComparison.OrdinalIgnoreCase))
             return new(PathKind.ModuleFile, segs, ModuleFile: segs[1][..^5]);
+
+        if (head == "heap")
+        {
+            if (segs.Length == 2 && segs[1] == "types")
+                return new(PathKind.HeapTypesFolder, segs);
+            if (segs.Length == 3 && segs[1] == "types"
+                && segs[2].EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                return new(PathKind.HeapTypeFile, segs, TypeName: segs[2][..^5]);
+        }
 
         return new(PathKind.Invalid, segs);
     }
@@ -129,7 +143,8 @@ public sealed class DumpProvider : ProviderBase
         return Parse(NormalizePath(path)).Kind switch
         {
             PathKind.Root or PathKind.ThreadsFolder or PathKind.ThreadFolder or
-            PathKind.ThreadFramesFolder or PathKind.ModulesFolder => true,
+            PathKind.ThreadFramesFolder or PathKind.ModulesFolder or
+            PathKind.HeapFolder or PathKind.HeapTypesFolder => true,
             _ => false,
         };
     }
@@ -176,6 +191,14 @@ public sealed class DumpProvider : ProviderBase
                 yield return ("info.json", false);
                 yield return ("threads", true);
                 yield return ("modules", true);
+                yield return ("heap", true);
+                break;
+            case PathKind.HeapFolder:
+                yield return ("types", true);
+                break;
+            case PathKind.HeapTypesFolder:
+                foreach (var t in Store.HeapTypes)
+                    yield return ($"{SanitizeFull(t.TypeName)}.json", false);
                 break;
             case PathKind.ThreadsFolder:
                 foreach (var t in Store.Threads)
@@ -184,6 +207,9 @@ public sealed class DumpProvider : ProviderBase
             case PathKind.ThreadFolder:
                 yield return ("info.json", false);
                 yield return ("stack.txt", false);
+                if (info.ThreadId is int tidEx
+                    && Store.Threads.FirstOrDefault(x => x.ManagedThreadId == tidEx)?.CurrentException != null)
+                    yield return ("exception.json", false);
                 yield return ("frames", true);
                 break;
             case PathKind.ThreadFramesFolder:
@@ -214,6 +240,21 @@ public sealed class DumpProvider : ProviderBase
                     "threads at time of dump", Store.Summary.ThreadCount);
                 WriteFolder("modules", MakePath(path, "modules"), dir,
                     "loaded modules", Store.Summary.ModuleCount);
+                WriteFolder("heap", MakePath(path, "heap"), dir,
+                    "GC heap analysis", null);
+                break;
+            case PathKind.HeapFolder:
+                WriteFolder("types", MakePath(path, "types"), dir,
+                    "instance counts and bytes per type, sorted by total bytes",
+                    null);
+                break;
+            case PathKind.HeapTypesFolder:
+                foreach (var t in Store.HeapTypes)
+                {
+                    if (Stopping) return;
+                    var tPath = MakePath(path, $"{SanitizeFull(t.TypeName)}.json");
+                    WriteFile($"{SanitizeFull(t.TypeName)}.json", tPath, dir);
+                }
                 break;
             case PathKind.ThreadsFolder:
                 foreach (var t in Store.Threads)
@@ -239,6 +280,9 @@ public sealed class DumpProvider : ProviderBase
             case PathKind.ThreadFolder:
                 WriteFile("info.json", MakePath(path, "info.json"), dir);
                 WriteFile("stack.txt", MakePath(path, "stack.txt"), dir);
+                if (info.ThreadId is int tidExWrite
+                    && Store.Threads.FirstOrDefault(x => x.ManagedThreadId == tidExWrite)?.CurrentException != null)
+                    WriteFile("exception.json", MakePath(path, "exception.json"), dir);
                 WriteFolder("frames", MakePath(path, "frames"), dir, "stack frames", null);
                 break;
             case PathKind.ThreadFramesFolder:
@@ -302,6 +346,13 @@ public sealed class DumpProvider : ProviderBase
                 => Store.Modules.FirstOrDefault(x => Sanitize(x.FileName)
                     .Equals(info.ModuleFile, StringComparison.OrdinalIgnoreCase)) is { } m
                     ? JsonSerializer.Serialize(m, TraceJson.Options) : "{}",
+            PathKind.ThreadException when info.ThreadId is int tidExp
+                => Store.Threads.FirstOrDefault(x => x.ManagedThreadId == tidExp)?.CurrentException is { } ex
+                    ? JsonSerializer.Serialize(ex, TraceJson.Options) : "{}",
+            PathKind.HeapTypeFile when info.TypeName != null
+                => Store.HeapTypes.FirstOrDefault(t =>
+                    SanitizeFull(t.TypeName).Equals(info.TypeName, StringComparison.Ordinal)) is { } stats
+                    ? JsonSerializer.Serialize(stats, TraceJson.Options) : "{}",
             _ => "",
         };
     }
@@ -339,6 +390,22 @@ public sealed class DumpProvider : ProviderBase
         var sb = new StringBuilder(name.Length);
         foreach (var ch in name)
             sb.Append(char.IsLetterOrDigit(ch) || ch is '_' or '-' or '.' ? ch : '_');
+        return sb.ToString();
+    }
+
+    /// <summary>More permissive sanitizer for CLR type names (keeps +, &lt;, &gt;, etc.
+    /// replaced by markers to stay path-safe while reversible via HeapTypes lookup).</summary>
+    private static string SanitizeFull(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return "unknown";
+        var sb = new StringBuilder(name.Length);
+        foreach (var ch in name)
+        {
+            if (char.IsLetterOrDigit(ch) || ch is '_' or '-' or '.' or '+' or ',' or ' ')
+                sb.Append(ch);
+            else
+                sb.Append('_');
+        }
         return sb.ToString();
     }
 
