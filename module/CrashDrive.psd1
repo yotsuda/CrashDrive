@@ -15,6 +15,7 @@
         'Disable-CrashEditorFollow'
         'Read-CrashMemory'
         'Get-CrashObject'
+        'Get-CrashLocalVariable'
     )
     FunctionsToExport    = @()
     AliasesToExport      = @()
