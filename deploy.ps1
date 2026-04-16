@@ -30,6 +30,10 @@ Copy-Item (Join-Path $moduleSource 'CrashDrive.Format.ps1xml') $ModulePath
 
 $buildOutput = Join-Path $projectDir "src\CrashDrive\bin\$Configuration\net8.0"
 Copy-Item (Join-Path $buildOutput 'CrashDrive.dll') $ModulePath
+# PDB too: managed-frame source resolution needs it next to the DLL when
+# the compile-time path is gone (self-dump from another machine, etc.).
+$pdb = Join-Path $buildOutput 'CrashDrive.pdb'
+if (Test-Path $pdb) { Copy-Item $pdb $ModulePath }
 # Dependencies not in the PowerShell host: copy them alongside the module DLL.
 @(
     'Microsoft.Diagnostics.Runtime.dll',

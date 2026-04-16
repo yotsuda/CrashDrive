@@ -1,6 +1,8 @@
 using CrashDrive.DbgEng;
 using CrashDrive.Store;
 using Microsoft.Diagnostics.Runtime;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
 
 namespace CrashDrive.Dump;
 
@@ -153,9 +155,16 @@ public sealed class DumpStore : IStore
     // ─── Source location lookup ──────────────────────────────────────
     //
     // Resolving (ip → file, line) is a per-frame operation that editor-follow
-    // relies on. Cache by IP since frames from different threads often share
-    // the same IP (e.g. many threads parked in NtWaitForSingleObject). Dump
-    // state is immutable so the cache is valid across session swaps.
+    // relies on. Two backends:
+    //   • Managed frames: ClrMD maps IP → ClrMethod → IL offset, and a portable
+    //     PDB sequence-point scan maps IL offset → (file, line). dbgeng's `ln`
+    //     doesn't resolve JIT'd IPs, which is why this path is needed.
+    //   • Native frames: dbgeng `ln 0x<ip>`. Returns null for public Microsoft
+    //     PDBs (no source info); private or source-indexed PDBs resolve.
+    //
+    // Cache by IP since frames from different threads often share the same IP
+    // (e.g. many threads parked in NtWaitForSingleObject). Dump state is
+    // immutable so the cache is valid across session swaps.
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<ulong, SourceLocation?>
         _sourceCache = new();
@@ -164,16 +173,139 @@ public sealed class DumpStore : IStore
     {
         if (ip == 0) return null;
         if (_sourceCache.TryGetValue(ip, out var cached)) return cached;
-        SourceLocation? result = null;
+        var result = TryManagedSourceLocation(ip) ?? TryNativeSourceLocation(ip);
+        _sourceCache[ip] = result;
+        return result;
+    }
+
+    private SourceLocation? TryNativeSourceLocation(ulong ip)
+    {
         try
         {
             using var lease = DbgEngSessionManager.AcquireFor(FilePath, _symbolPath);
             var hit = lease.Session.GetSourceLocation(ip);
-            if (hit is { } v) result = new SourceLocation(v.File, v.Line);
+            return hit is { } v ? new SourceLocation(v.File, v.Line) : null;
         }
-        catch { }
-        _sourceCache[ip] = result;
-        return result;
+        catch { return null; }
+    }
+
+    private SourceLocation? TryManagedSourceLocation(ulong ip)
+    {
+        var runtime = _runtime.Value;
+        if (runtime == null) return null;
+
+        ClrMethod? method;
+        try { method = runtime.GetMethodByInstructionPointer(ip); }
+        catch { return null; }
+        if (method == null) return null;
+
+        // ILOffsetMap entries associate native IP ranges with IL offsets.
+        // Negative IL offsets are sentinels (no-mapping / prolog / epilog) and
+        // don't correspond to a source line.
+        int ilOffset = -1;
+        foreach (var m in method.ILOffsetMap)
+        {
+            if (ip >= m.StartAddress && ip < m.EndAddress)
+            {
+                ilOffset = m.ILOffset;
+                break;
+            }
+        }
+        if (ilOffset < 0) return null;
+
+        var module = method.Type?.Module;
+        if (module == null) return null;
+
+        var reader = GetPdbReader(module);
+        if (reader == null) return null;
+
+        int rowNumber = method.MetadataToken & 0x00FFFFFF;
+        if (rowNumber == 0) return null;
+        var handle = MetadataTokens.MethodDebugInformationHandle(rowNumber);
+
+        MethodDebugInformation mdi;
+        try { mdi = reader.GetMethodDebugInformation(handle); }
+        catch { return null; }
+
+        // Within a method, sequence points are emitted in IL order. Pick the
+        // last non-hidden point whose offset ≤ target IL offset — that's the
+        // statement whose native code the IP is executing.
+        string? file = null;
+        int line = 0;
+        try
+        {
+            foreach (var sp in mdi.GetSequencePoints())
+            {
+                if (sp.IsHidden) continue;
+                if (sp.Offset > ilOffset) break;
+                var doc = reader.GetDocument(sp.Document);
+                file = reader.GetString(doc.Name);
+                line = sp.StartLine;
+            }
+        }
+        catch { return null; }
+
+        return file == null ? null : new SourceLocation(file, line);
+    }
+
+    // Portable PDB readers, kept alive for the store's lifetime because the
+    // provider owns the backing stream — disposing it invalidates any
+    // MetadataReader handed out. Keyed by module image base.
+    private readonly object _pdbLock = new();
+    private readonly Dictionary<ulong, MetadataReaderProvider?> _pdbReaders = new();
+
+    private MetadataReader? GetPdbReader(ClrModule module)
+    {
+        lock (_pdbLock)
+        {
+            if (_pdbReaders.TryGetValue(module.ImageBase, out var cached))
+                return cached?.GetMetadataReader();
+            var provider = TryOpenPortablePdb(module);
+            _pdbReaders[module.ImageBase] = provider;
+            return provider?.GetMetadataReader();
+        }
+    }
+
+    private static MetadataReaderProvider? TryOpenPortablePdb(ClrModule module)
+    {
+        // Two candidate paths: the compile-time path in the module's debug
+        // directory (usually points at the build output), and a next-to-DLL
+        // fallback for deployed scenarios. Windows PDBs (MSF container) are
+        // not readable via System.Reflection.Metadata — we only handle
+        // portable PDBs and leave Windows-PDB managed modules unresolved.
+        var candidates = new List<string>();
+        var pdb = module.Pdb;
+        if (pdb != null && !string.IsNullOrWhiteSpace(pdb.Path))
+            candidates.Add(pdb.Path);
+        if (!string.IsNullOrWhiteSpace(module.Name))
+        {
+            var guess = Path.ChangeExtension(module.Name, ".pdb");
+            if (!candidates.Contains(guess, StringComparer.OrdinalIgnoreCase))
+                candidates.Add(guess);
+        }
+
+        foreach (var path in candidates)
+        {
+            if (!File.Exists(path)) continue;
+            try
+            {
+                // Portable PDBs begin with the ECMA-335 "BSJB" metadata
+                // signature (0x424A5342). Windows PDBs start with the MSF
+                // header "Microsoft C/C++ MSF 7.00\r\n\u001aDS".
+                using (var peek = File.OpenRead(path))
+                {
+                    Span<byte> header = stackalloc byte[4];
+                    if (peek.Read(header) != 4) continue;
+                    if (header[0] != 0x42 || header[1] != 0x53 ||
+                        header[2] != 0x4A || header[3] != 0x42)
+                        continue;
+                }
+                var stream = File.OpenRead(path);
+                return MetadataReaderProvider.FromPortablePdbStream(stream);
+            }
+            catch { }
+        }
+        return null;
     }
 
     private string RunAnalyze()
@@ -354,6 +486,14 @@ public sealed class DumpStore : IStore
             try { _runtime.Value?.Dispose(); } catch { }
         }
         lock (_regCacheLock) _regCache.Clear();
+        lock (_pdbLock)
+        {
+            foreach (var provider in _pdbReaders.Values)
+            {
+                try { provider?.Dispose(); } catch { }
+            }
+            _pdbReaders.Clear();
+        }
         _target.Dispose();
         DbgEngSessionManager.CloseIf(FilePath);
     }
