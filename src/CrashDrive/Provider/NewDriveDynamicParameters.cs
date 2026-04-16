@@ -3,9 +3,8 @@ using System.Management.Automation;
 namespace CrashDrive.Provider;
 
 /// <summary>
-/// Dynamic parameters for <c>New-PSDrive -PSProvider CrashDrive ...</c>.
-/// Exposed via the <c>New-CrashDrive</c> convenience cmdlet and directly on
-/// <c>New-PSDrive</c>.
+/// Dynamic parameters for <c>New-PSDrive -PSProvider (Trace|Dump|Ttd) ...</c>
+/// and used transitively by <c>New-CrashDrive</c>.
 /// </summary>
 public sealed class NewCrashDriveDynamicParameters
 {

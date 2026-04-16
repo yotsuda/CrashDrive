@@ -1,14 +1,14 @@
 using System.Management.Automation;
-using CrashDrive.Provider;
+using CrashDrive.Store;
 
 namespace CrashDrive.Cmdlets;
 
 /// <summary>
-/// Convenience wrapper around <c>New-PSDrive -PSProvider CrashDrive</c>.
-/// Mount a trace file or crash dump as a new PSDrive.
+/// Mount a post-mortem data file (execution trace, crash dump, or TTD trace)
+/// as a PSDrive. Auto-detects the file kind and delegates to the appropriate
+/// provider (<c>Trace</c>, <c>Dump</c>, or <c>Ttd</c>).
 /// </summary>
 [Cmdlet(VerbsCommon.New, "CrashDrive")]
-[OutputType(typeof(CrashDriveInfo))]
 public sealed class NewCrashDriveCmdlet : PSCmdlet
 {
     [Parameter(Mandatory = true, Position = 0)]
@@ -38,37 +38,32 @@ public sealed class NewCrashDriveCmdlet : PSCmdlet
             return;
         }
 
-        // Build the command: New-PSDrive -PSProvider CrashDrive -Name X -Root \ -File Y [-SymbolPath Z]
-        // We invoke via the runtime so dynamic parameters are honored.
-        var ps = PowerShell.Create(RunspaceMode.CurrentRunspace);
-        try
+        var kind = StoreFactory.DetectKind(resolved);
+        var providerName = kind switch
         {
-            var cmd = ps.AddCommand("New-PSDrive")
-                .AddParameter("PSProvider", "CrashDrive")
-                .AddParameter("Name", Name)
-                .AddParameter("Root", @"\")
-                .AddParameter("File", resolved)
-                .AddParameter("Scope", "Global");
+            StoreKind.Trace => "Trace",
+            StoreKind.Dump => "Dump",
+            StoreKind.Ttd => "Ttd",
+            _ => throw new NotSupportedException($"Unknown file kind: {kind}"),
+        };
 
-            if (SymbolPath != null) cmd.AddParameter("SymbolPath", SymbolPath);
+        using var ps = PowerShell.Create(RunspaceMode.CurrentRunspace);
+        var cmd = ps.AddCommand("New-PSDrive")
+            .AddParameter("PSProvider", providerName)
+            .AddParameter("Name", Name)
+            .AddParameter("Root", @"\")
+            .AddParameter("File", resolved)
+            .AddParameter("Scope", "Global");
 
-            var results = ps.Invoke();
-            if (ps.HadErrors)
-            {
-                foreach (var err in ps.Streams.Error)
-                    WriteError(err);
-                return;
-            }
+        if (SymbolPath != null) cmd.AddParameter("SymbolPath", SymbolPath);
 
-            if (PassThru.IsPresent)
-            {
-                foreach (var r in results)
-                    WriteObject(r);
-            }
-        }
-        finally
+        var results = ps.Invoke();
+        if (ps.HadErrors)
         {
-            ps.Dispose();
+            foreach (var err in ps.Streams.Error) WriteError(err);
+            return;
         }
+        if (PassThru.IsPresent)
+            foreach (var r in results) WriteObject(r);
     }
 }
