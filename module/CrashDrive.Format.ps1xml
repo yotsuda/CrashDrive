@@ -230,6 +230,31 @@
     </View>
 
     <View>
+      <Name>TtdPositionFrameItem</Name>
+      <ViewSelectedBy>
+        <TypeName>CrashDrive.Models.TtdPositionFrameItem</TypeName>
+      </ViewSelectedBy>
+      <GroupBy>
+        <PropertyName>Directory</PropertyName>
+      </GroupBy>
+      <TableControl>
+        <AutoSize/>
+        <TableHeaders>
+          <TableColumnHeader><Label>#</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Frame</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Index</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Frame</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <View>
       <Name>TtdMemoryItem</Name>
       <ViewSelectedBy>
         <TypeName>CrashDrive.Models.TtdMemoryItem</TypeName>

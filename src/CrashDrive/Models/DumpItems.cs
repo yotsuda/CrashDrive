@@ -63,6 +63,16 @@ public class TtdCallItem
     public string Directory { get; set; } = "";
 }
 
+/// <summary>TTD stack frame at a specific time position.</summary>
+public class TtdPositionFrameItem
+{
+    public int Index { get; set; }
+    public string Name { get; set; } = "";
+    public string Frame { get; set; } = "";   // e.g. "ntdll!LdrInitializeThunk"
+    public string Path { get; set; } = "";
+    public string Directory { get; set; } = "";
+}
+
 /// <summary>TTD memory access record.</summary>
 public class TtdMemoryItem
 {

@@ -282,9 +282,23 @@ public sealed class TtdProvider : ProviderBase
                 }
                 break;
 
+            case PathKind.PositionFrameFile when info.EncodedPosition != null
+                    && info.ThreadId != null && info.FrameIndex is int pfi:
+                Store.SeekTo(ResolvePosition(info.EncodedPosition));
+                var pframes = Store.GetFramesAtCurrentPosition(info.ThreadId);
+                var pf = pframes.FirstOrDefault(x => x.Index == pfi);
+                if (pf != null)
+                {
+                    WriteItemObject(new Models.TtdPositionFrameItem
+                    {
+                        Index = pf.Index, Name = name, Frame = pf.Description,
+                        Path = EnsureDrivePrefix(path), Directory = dir,
+                    }, path, isContainer: false);
+                }
+                break;
+
             case PathKind.Summary or PathKind.Info or PathKind.Timeline
-                or PathKind.PositionInfoFile or PathKind.PositionThreadInfoFile
-                or PathKind.PositionFrameFile:
+                or PathKind.PositionInfoFile or PathKind.PositionThreadInfoFile:
                 WriteFile(name, path, dir);
                 break;
 
@@ -556,7 +570,15 @@ public sealed class TtdProvider : ProviderBase
                     foreach (var f in Store.GetFramesAtCurrentPosition(info.ThreadId))
                     {
                         if (Stopping) return;
-                        WriteFile($"{f.Index}.json", MakePath(path, $"{f.Index}.json"), dir);
+                        var fPath = MakePath(path, $"{f.Index}.json");
+                        WriteItemObject(new Models.TtdPositionFrameItem
+                        {
+                            Index = f.Index,
+                            Name = $"{f.Index}.json",
+                            Frame = f.Description,
+                            Path = EnsureDrivePrefix(fPath),
+                            Directory = dir,
+                        }, fPath, isContainer: false);
                     }
                 }
                 break;
