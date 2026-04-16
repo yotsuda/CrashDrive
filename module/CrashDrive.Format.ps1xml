@@ -21,6 +21,7 @@
         <PropertyName>Directory</PropertyName>
       </GroupBy>
       <TableControl>
+        <AutoSize/>
         <TableHeaders>
           <TableColumnHeader><Label>Mode</Label><Width>5</Width></TableColumnHeader>
           <TableColumnHeader><Label>Count</Label><Alignment>Right</Alignment></TableColumnHeader>
@@ -53,6 +54,7 @@
         <PropertyName>Directory</PropertyName>
       </GroupBy>
       <TableControl>
+        <AutoSize/>
         <TableHeaders>
           <TableColumnHeader><Label>Seq</Label><Alignment>Right</Alignment></TableColumnHeader>
           <TableColumnHeader><Label>Type</Label></TableColumnHeader>
@@ -83,6 +85,7 @@
         <PropertyName>Directory</PropertyName>
       </GroupBy>
       <TableControl>
+        <AutoSize/>
         <TableHeaders>
           <TableColumnHeader><Label>#</Label><Alignment>Right</Alignment></TableColumnHeader>
           <TableColumnHeader><Label>Seq</Label><Alignment>Right</Alignment></TableColumnHeader>
@@ -115,6 +118,7 @@
         <PropertyName>Directory</PropertyName>
       </GroupBy>
       <TableControl>
+        <AutoSize/>
         <TableHeaders>
           <TableColumnHeader><Label>MgdId</Label><Alignment>Right</Alignment></TableColumnHeader>
           <TableColumnHeader><Label>OSId</Label><Alignment>Right</Alignment></TableColumnHeader>
@@ -145,6 +149,7 @@
         <PropertyName>Directory</PropertyName>
       </GroupBy>
       <TableControl>
+        <AutoSize/>
         <TableHeaders>
           <TableColumnHeader><Label>#</Label><Alignment>Right</Alignment></TableColumnHeader>
           <TableColumnHeader><Label>Kind</Label></TableColumnHeader>
@@ -165,6 +170,97 @@
     </View>
 
     <View>
+      <Name>TtdEventItem</Name>
+      <ViewSelectedBy>
+        <TypeName>CrashDrive.Models.TtdEventItem</TypeName>
+      </ViewSelectedBy>
+      <GroupBy>
+        <PropertyName>Directory</PropertyName>
+      </GroupBy>
+      <TableControl>
+        <AutoSize/>
+        <TableHeaders>
+          <TableColumnHeader><Label>#</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Position</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Type</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Module</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Index</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Position</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Type</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Module</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <View>
+      <Name>TtdCallItem</Name>
+      <ViewSelectedBy>
+        <TypeName>CrashDrive.Models.TtdCallItem</TypeName>
+      </ViewSelectedBy>
+      <GroupBy>
+        <PropertyName>Directory</PropertyName>
+      </GroupBy>
+      <TableControl>
+        <AutoSize/>
+        <TableHeaders>
+          <TableColumnHeader><Label>#</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Thread</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Entry</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Exit</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Return</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Index</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>ThreadId</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>TimeStart</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>TimeEnd</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>ReturnValue</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <View>
+      <Name>TtdMemoryItem</Name>
+      <ViewSelectedBy>
+        <TypeName>CrashDrive.Models.TtdMemoryItem</TypeName>
+      </ViewSelectedBy>
+      <GroupBy>
+        <PropertyName>Directory</PropertyName>
+      </GroupBy>
+      <TableControl>
+        <AutoSize/>
+        <TableHeaders>
+          <TableColumnHeader><Label>#</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Position</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Op</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Address</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Value</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Index</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Position</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>AccessType</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Address</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Value</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <View>
       <Name>ModuleItem</Name>
       <ViewSelectedBy>
         <TypeName>CrashDrive.Models.ModuleItem</TypeName>
@@ -173,6 +269,7 @@
         <PropertyName>Directory</PropertyName>
       </GroupBy>
       <TableControl>
+        <AutoSize/>
         <TableHeaders>
           <TableColumnHeader><Label>Name</Label></TableColumnHeader>
           <TableColumnHeader><Label>Size</Label><Alignment>Right</Alignment></TableColumnHeader>

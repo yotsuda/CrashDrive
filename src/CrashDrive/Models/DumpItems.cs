@@ -37,3 +37,41 @@ public class ModuleItem
     public string Path { get; set; } = "";
     public string Directory { get; set; } = "";
 }
+
+/// <summary>TTD notable event (ModuleLoaded, ThreadCreated, etc.) as a PSDrive entry.</summary>
+public class TtdEventItem
+{
+    public int Index { get; set; }
+    public string Name { get; set; } = "";
+    public string Position { get; set; } = "";
+    public string Type { get; set; } = "";
+    public string Module { get; set; } = "";
+    public string Path { get; set; } = "";
+    public string Directory { get; set; } = "";
+}
+
+/// <summary>TTD call record (one invocation of a function).</summary>
+public class TtdCallItem
+{
+    public int Index { get; set; }
+    public string Name { get; set; } = "";
+    public string ThreadId { get; set; } = "";
+    public string TimeStart { get; set; } = "";
+    public string TimeEnd { get; set; } = "";
+    public string ReturnValue { get; set; } = "";
+    public string Path { get; set; } = "";
+    public string Directory { get; set; } = "";
+}
+
+/// <summary>TTD memory access record.</summary>
+public class TtdMemoryItem
+{
+    public int Index { get; set; }
+    public string Name { get; set; } = "";
+    public string Position { get; set; } = "";
+    public string AccessType { get; set; } = "";
+    public string Address { get; set; } = "";
+    public string Value { get; set; } = "";
+    public string Path { get; set; } = "";
+    public string Directory { get; set; } = "";
+}

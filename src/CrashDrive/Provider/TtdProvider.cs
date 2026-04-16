@@ -385,7 +385,19 @@ public sealed class TtdProvider : ProviderBase
                     for (int i = 0; i < calls.Count; i++)
                     {
                         if (Stopping) return;
-                        WriteFile($"{i}.json", MakePath(path, $"{i}.json"), dir);
+                        var c = calls[i];
+                        var cPath = MakePath(path, $"{i}.json");
+                        WriteItemObject(new Models.TtdCallItem
+                        {
+                            Index = i,
+                            Name = $"{i}.json",
+                            ThreadId = c.ThreadId,
+                            TimeStart = c.TimeStart,
+                            TimeEnd = c.TimeEnd,
+                            ReturnValue = c.ReturnValue,
+                            Path = EnsureDrivePrefix(cPath),
+                            Directory = dir,
+                        }, cPath, isContainer: false);
                     }
                 }
                 break;
@@ -403,7 +415,19 @@ public sealed class TtdProvider : ProviderBase
                     for (int i = 0; i < records.Count; i++)
                     {
                         if (Stopping) return;
-                        WriteFile($"{i}.json", MakePath(path, $"{i}.json"), dir);
+                        var r = records[i];
+                        var rPath = MakePath(path, $"{i}.json");
+                        WriteItemObject(new Models.TtdMemoryItem
+                        {
+                            Index = i,
+                            Name = $"{i}.json",
+                            Position = r.TimeStart,
+                            AccessType = r.AccessType,
+                            Address = r.Address,
+                            Value = r.Value,
+                            Path = EnsureDrivePrefix(rPath),
+                            Directory = dir,
+                        }, rPath, isContainer: false);
                     }
                 }
                 break;
@@ -412,7 +436,18 @@ public sealed class TtdProvider : ProviderBase
                 for (int i = 0; i < Store.Events.Count; i++)
                 {
                     if (Stopping) return;
-                    WriteFile($"{i}.json", MakePath(path, $"{i}.json"), dir);
+                    var ev = Store.Events[i];
+                    var ePath = MakePath(path, $"{i}.json");
+                    WriteItemObject(new Models.TtdEventItem
+                    {
+                        Index = i,
+                        Name = $"{i}.json",
+                        Position = ev.Position,
+                        Type = ev.Type,
+                        Module = ev.Module,
+                        Path = EnsureDrivePrefix(ePath),
+                        Directory = dir,
+                    }, ePath, isContainer: false);
                 }
                 break;
 
