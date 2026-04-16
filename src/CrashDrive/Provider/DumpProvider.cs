@@ -63,7 +63,7 @@ public sealed class DumpProvider : ProviderBase
 
     private enum PathKind
     {
-        Root, Summary, Analyze,
+        Root, Summary, Analyze, Triage,
         ThreadsFolder, ThreadFolder, ThreadInfo, ThreadStack, ThreadException, ThreadRegisters,
         ThreadFramesFolder, FrameFile,
         ModulesFolder, ModuleFile,
@@ -91,6 +91,7 @@ public sealed class DumpProvider : ProviderBase
             {
                 "summary.json" => new(PathKind.Summary, segs),
                 "analyze.txt" => new(PathKind.Analyze, segs),
+                "triage.md" => new(PathKind.Triage, segs),
                 "threads" => new(PathKind.ThreadsFolder, segs),
                 "modules" => new(PathKind.ModulesFolder, segs),
                 "heap" => new(PathKind.HeapFolder, segs),
@@ -256,7 +257,8 @@ public sealed class DumpProvider : ProviderBase
                 }
                 break;
 
-            case PathKind.Summary or PathKind.Analyze or PathKind.ThreadInfo or PathKind.ThreadStack
+            case PathKind.Summary or PathKind.Analyze or PathKind.Triage
+                or PathKind.ThreadInfo or PathKind.ThreadStack
                 or PathKind.ThreadException or PathKind.ThreadRegisters:
                 WriteFile(name, path, dir);
                 break;
@@ -312,6 +314,7 @@ public sealed class DumpProvider : ProviderBase
         switch (info.Kind)
         {
             case PathKind.Root:
+                yield return ("triage.md", false);
                 yield return ("summary.json", false);
                 yield return ("analyze.txt", false);
                 yield return ("threads", true);
@@ -360,6 +363,7 @@ public sealed class DumpProvider : ProviderBase
         switch (info.Kind)
         {
             case PathKind.Root:
+                WriteFile("triage.md", MakePath(path, "triage.md"), dir);
                 WriteFile("summary.json", MakePath(path, "summary.json"), dir);
                 WriteFile("analyze.txt", MakePath(path, "analyze.txt"), dir);
                 WriteFolder("threads", MakePath(path, "threads"), dir,
@@ -474,6 +478,7 @@ public sealed class DumpProvider : ProviderBase
         {
             PathKind.Summary => JsonSerializer.Serialize(Store.Summary, TraceJson.Options),
             PathKind.Analyze => Store.AnalyzeOutput,
+            PathKind.Triage  => RenderTriage(),
             PathKind.ThreadInfo when info.ThreadId is int tid
                 => Store.Threads.FirstOrDefault(x => x.ManagedThreadId == tid) is { } t
                     ? JsonSerializer.Serialize(t, TraceJson.Options) : "{}",
@@ -496,6 +501,121 @@ public sealed class DumpProvider : ProviderBase
                     ? JsonSerializer.Serialize(stats, TraceJson.Options) : "{}",
             _ => "",
         };
+    }
+
+    /// <summary>One-page Markdown answering "what happened?" from the data we
+    /// can gather cheaply: Summary (metadata), Threads (walked), Modules
+    /// (enumerated). Deliberately avoids !analyze -v and HeapTypes because both
+    /// can take 10+ seconds; the reader can still reach them via analyze.txt
+    /// and heap\types\.</summary>
+    private string RenderTriage()
+    {
+        var s = Store.Summary;
+        var sb = new StringBuilder();
+        sb.Append("# Dump Triage: ").AppendLine(Path.GetFileName(s.FilePath));
+        sb.AppendLine();
+        sb.Append("**Dump:** `").Append(s.FilePath).Append("` (")
+          .Append(FormatBytes(s.FileSizeBytes)).AppendLine(")");
+        sb.Append("**Architecture:** ").AppendLine(s.Architecture);
+        if (!string.IsNullOrEmpty(s.ClrVersion))
+            sb.Append("**CLR:** ").Append(s.ClrVersion)
+              .Append(" (").Append(s.ClrFlavor).AppendLine(")");
+        else
+            sb.AppendLine("**CLR:** none (native-only dump)");
+        sb.Append("**Threads:** ").Append(s.ThreadCount).AppendLine();
+        sb.Append("**Modules:** ").Append(s.ModuleCount).AppendLine();
+        sb.AppendLine();
+
+        // Threads carrying a managed exception are the primary "what broke?"
+        // signal on a CLR dump. Non-managed crashes surface via !analyze -v.
+        var withExc = Store.Threads.Where(t => t.CurrentException != null).ToList();
+        sb.Append("## Threads with active managed exceptions (")
+          .Append(withExc.Count).AppendLine(")");
+        sb.AppendLine();
+        if (withExc.Count == 0)
+        {
+            sb.AppendLine("No thread has a current managed exception. If the");
+            sb.AppendLine("process crashed natively (AV / stack overflow / etc.),");
+            sb.AppendLine("read `analyze.txt` — it runs `!analyze -v` on first");
+            sb.AppendLine("access and caches the result.");
+        }
+        else
+        {
+            foreach (var t in withExc.Take(10))
+            {
+                var ex = t.CurrentException!;
+                sb.Append("- `threads\\").Append(t.ManagedThreadId).Append("\\` — **")
+                  .Append(ex.TypeName).Append("**");
+                if (!string.IsNullOrEmpty(ex.Message))
+                    sb.Append(": ").Append(ex.Message);
+                sb.AppendLine();
+                sb.Append("  HResult: 0x").Append(ex.HResult.ToString("X8"))
+                  .Append(", OS thread 0x").Append(t.OSThreadId.ToString("X"))
+                  .Append(", ").Append(t.Frames.Count).AppendLine(" frames");
+            }
+            if (withExc.Count > 10)
+                sb.Append("- ... (+").Append(withExc.Count - 10).AppendLine(" more)");
+        }
+        sb.AppendLine();
+
+        // Aggregate thread counts — lets readers spot "everyone's parked in a
+        // wait" vs "one GC thread stuck" at a glance.
+        var alive      = Store.Threads.Count(t => t.IsAlive);
+        var finalizer  = Store.Threads.Count(t => t.IsFinalizer);
+        var gcThreads  = Store.Threads.Count(t => t.IsGC);
+        var coop       = Store.Threads.Count(t => t.GCMode == "Cooperative");
+        var preemptive = Store.Threads.Count(t => t.GCMode == "Preemptive");
+
+        sb.AppendLine("## Thread summary");
+        sb.AppendLine();
+        sb.Append("- **Alive:** ").Append(alive).Append(" / ")
+          .Append(Store.Threads.Count).AppendLine();
+        if (finalizer > 0) sb.Append("- **Finalizer:** ").Append(finalizer).AppendLine();
+        if (gcThreads > 0) sb.Append("- **GC:** ").Append(gcThreads).AppendLine();
+        if (coop + preemptive > 0)
+            sb.Append("- **GCMode:** Cooperative=").Append(coop)
+              .Append(", Preemptive=").Append(preemptive).AppendLine();
+        sb.AppendLine();
+
+        // Top-5 modules by size gives a quick sense of what's loaded without
+        // dumping all 200+ modules into the triage. Full list is in modules\.
+        var topModules = Store.Modules
+            .Where(m => m.Size > 0)
+            .OrderByDescending(m => m.Size)
+            .Take(5)
+            .ToList();
+        if (topModules.Count > 0)
+        {
+            sb.AppendLine("## Top modules by size");
+            sb.AppendLine();
+            foreach (var m in topModules)
+                sb.Append("- `").Append(m.FileName).Append("` (")
+                  .Append(FormatBytes(m.Size)).AppendLine(")");
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("## Where to look next");
+        sb.AppendLine();
+        sb.AppendLine("- `threads\\<id>\\` — per-thread info, stack, registers, exception");
+        sb.AppendLine("- `threads\\<id>\\frames\\<n>.json` — individual stack frames " +
+                      "(source location when resolvable)");
+        sb.AppendLine("- `threads\\<id>\\stack.txt` — full formatted stack trace");
+        sb.AppendLine("- `modules\\` — native + managed modules (unified view)");
+        sb.AppendLine("- `heap\\types\\` — GC heap instance counts per type " +
+                      "(first access walks the heap; can take seconds)");
+        sb.AppendLine("- `analyze.txt` — `!analyze -v` output " +
+                      "(first read runs dbgeng analysis; can take 10+ seconds)");
+        sb.AppendLine("- `Invoke-CrashCommand` — raw dbgeng escape hatch " +
+                      "(e.g. `!locks`, `!syncblk`, `dx`)");
+        return sb.ToString();
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:0.0} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):0.0} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):0.00} GB";
     }
 
     private string RenderThreadStack(int managedThreadId)

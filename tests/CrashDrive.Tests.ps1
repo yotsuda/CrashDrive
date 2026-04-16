@@ -64,9 +64,19 @@ Describe 'Dump provider' -Tag 'Dump' -Skip:(-not $HasDump) {
     It 'mounts a .dmp and exposes the expected root children' {
         New-CrashDrive smoke_dump $DumpPath
         $names = (Get-ChildItem smoke_dump:\).Name
+        $names | Should -Contain 'triage.md'
         $names | Should -Contain 'summary.json'
         $names | Should -Contain 'threads'
         $names | Should -Contain 'modules'
+    }
+
+    It 'renders triage.md without running expensive operations' {
+        New-CrashDrive smoke_dump $DumpPath
+        $triage = (Get-Content smoke_dump:\triage.md) -join "`n"
+        $triage | Should -Match '# Dump Triage:'
+        $triage | Should -Match '## Threads with active managed exceptions'
+        $triage | Should -Match '## Thread summary'
+        $triage | Should -Match '## Where to look next'
     }
 
     It 'reads summary.json as JSON' {
