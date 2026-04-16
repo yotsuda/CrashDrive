@@ -47,6 +47,9 @@ Describe 'Module manifest' {
             'Get-CrashLocalVariable'
             'Enable-CrashEditorFollow'
             'Disable-CrashEditorFollow'
+            'New-TtdBookmark'
+            'Get-TtdBookmark'
+            'Remove-TtdBookmark'
         )
         $actual = (Get-Command -Module CrashDrive).Name
         foreach ($cmd in $expected) {
@@ -130,6 +133,45 @@ Describe 'TTD provider' -Tag 'Ttd' -Skip:(-not $HasTtd) {
         $items = Get-ChildItem smoke_ttd:\calls\python313\Py_Main
         $items.Name | Should -Contain '0.json'
         ($items | Where-Object Name -match '^\d+-\d+$').Count | Should -Be 0
+    }
+
+    It 'bookmarks round-trip and resolve to the position tree' {
+        New-CrashDrive smoke_ttd $TtdPath
+
+        # Empty by default
+        (Get-TtdBookmark -Drive smoke_ttd | Measure-Object).Count | Should -Be 0
+
+        # Create two bookmarks and list them
+        New-TtdBookmark -Drive smoke_ttd -Name crash-point -Position 1CBF:8C0 | Out-Null
+        New-TtdBookmark -Drive smoke_ttd -Name life-start  -Position start | Out-Null
+        $bm = Get-TtdBookmark -Drive smoke_ttd | Sort-Object Name
+        $bm.Count     | Should -Be 2
+        $bm[0].Name   | Should -Be 'crash-point'
+        $bm[0].Position | Should -Be '1CBF:8C0'
+
+        # ttd:\bookmarks\ exposes both
+        $children = Get-ChildItem smoke_ttd:\bookmarks
+        $children.Name | Should -Contain 'crash-point'
+        $children.Name | Should -Contain 'life-start'
+
+        # Drill-in mirrors the position tree
+        (Get-ChildItem smoke_ttd:\bookmarks\crash-point).Name |
+            Should -Contain 'position.json'
+        $json = (Get-Content smoke_ttd:\bookmarks\crash-point\position.json) -join "`n" |
+                ConvertFrom-Json
+        $json.Native | Should -Be '1CBF:8C0'
+
+        # Remove one, the other survives
+        Remove-TtdBookmark -Drive smoke_ttd -Name life-start
+        (Get-TtdBookmark -Drive smoke_ttd).Name | Should -Be 'crash-point'
+    }
+
+    It 'rejects bookmark names containing path separators' {
+        New-CrashDrive smoke_ttd $TtdPath
+        { New-TtdBookmark -Drive smoke_ttd -Name 'bad/name' -Position start -ErrorAction Stop } |
+            Should -Throw
+        { New-TtdBookmark -Drive smoke_ttd -Name ''         -Position start -ErrorAction Stop } |
+            Should -Throw
     }
 }
 

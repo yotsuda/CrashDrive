@@ -88,6 +88,8 @@ public sealed class TtdProvider : ProviderBase
         CallsRangeFolder,                           // calls/<module>/<function>/<start>-<end>/
         CallsRangeFile,                             // calls/<module>/<function>/<start>-<end>/<n>.json
 
+        BookmarksFolder,                            // bookmarks/
+
         MemoryFolder,                               // memory/
         MemoryRangeFolder,                          // memory/<start>_<end>/
         MemoryAccessKindFolder,                     // memory/<range>/{writes,reads,rw}/
@@ -146,6 +148,7 @@ public sealed class TtdProvider : ProviderBase
                 "ttd-events" => new(PathKind.EventsFolder, segs),
                 "positions" => new(PathKind.PositionsFolder, segs),
                 "calls" => new(PathKind.CallsFolder, segs),
+                "bookmarks" => new(PathKind.BookmarksFolder, segs),
                 "memory" => new(PathKind.MemoryFolder, segs),
                 _ => new(PathKind.Invalid, segs),
             };
@@ -240,6 +243,25 @@ public sealed class TtdProvider : ProviderBase
                     Module: segs[1], Function: segs[2],
                     RangeStart: rs2, RangeEnd: re2, Index: rnIdx);
             }
+        }
+
+        if (head == "bookmarks" && segs.Length >= 2)
+        {
+            // Resolve the bookmark name → native position, then re-parse the
+            // remainder as if it were the equivalent positions/<encoded>/ path.
+            // Keeps the surface `bookmarks\<name>\…` but reuses every downstream
+            // code path that already handles position-rooted navigation.
+            if (PSDriveInfo is not TtdDriveInfo drive
+                || !drive.Bookmarks.TryGetValue(segs[1], out var native))
+                return new(PathKind.Invalid, segs);
+            var encPos = Ttd.TtdPosition.Encode(native);
+            if (segs.Length == 2)
+                return new(PathKind.PositionFolder, segs, EncodedPosition: encPos);
+            var synthetic = "positions/" + encPos + "/" + string.Join('/', segs.Skip(2));
+            var resolved = Parse(synthetic);
+            // Swap segments back to the bookmark-rooted form so downstream
+            // path-join calls (MakePath) produce bookmarks\…, not positions\….
+            return resolved with { Segments = segs };
         }
 
         if (head == "memory")
@@ -350,6 +372,7 @@ public sealed class TtdProvider : ProviderBase
             PathKind.PositionThreadFramesFolder or
             PathKind.CallsFolder or PathKind.CallsModuleFolder or
             PathKind.CallsFunctionFolder or PathKind.CallsRangeFolder or
+            PathKind.BookmarksFolder or
             PathKind.MemoryFolder or PathKind.MemoryRangeFolder or
             PathKind.MemoryAccessKindFolder or
             PathKind.MemoryLastWriteBeforeFolder => true,
@@ -594,6 +617,16 @@ public sealed class TtdProvider : ProviderBase
                 yield return ("timeline", true);
                 yield return ("ttd-events", true);
                 yield return ("positions", true);
+                yield return ("bookmarks", true);
+                break;
+
+            case PathKind.BookmarksFolder:
+                if (PSDriveInfo is TtdDriveInfo bdrv)
+                {
+                    foreach (var name in bdrv.Bookmarks.Keys
+                                                .OrderBy(x => x, StringComparer.Ordinal))
+                        yield return (name, true);
+                }
                 break;
 
             case PathKind.TimelineFolder:
@@ -745,6 +778,9 @@ public sealed class TtdProvider : ProviderBase
                     "navigable time positions", null);
                 WriteFolder("calls", MakePath(path, "calls"), dir,
                     "query calls to specific functions: calls\\<module>\\<function>\\", null);
+                WriteFolder("bookmarks", MakePath(path, "bookmarks"), dir,
+                    "named positions: New-TtdBookmark -Name <n> -Position <pos>",
+                    PSDriveInfo is TtdDriveInfo bkDrv ? bkDrv.Bookmarks.Count : (int?)null);
                 WriteFolder("memory", MakePath(path, "memory"), dir,
                     "memory access history: memory\\<start>_<end>\\{writes,reads,rw}\\", null);
                 break;
@@ -787,6 +823,20 @@ public sealed class TtdProvider : ProviderBase
                     var mPath = MakePath(path, mod);
                     WriteFolder(mod, mPath, dir,
                         "enter a function name as sub-folder (e.g. calls\\" + mod + "\\SomeFunction)", null);
+                }
+                break;
+
+            case PathKind.BookmarksFolder:
+                if (PSDriveInfo is TtdDriveInfo bkDrvW)
+                {
+                    foreach (var kvp in bkDrvW.Bookmarks
+                                              .OrderBy(x => x.Key, StringComparer.Ordinal))
+                    {
+                        if (Stopping) return;
+                        var bPath = MakePath(path, kvp.Key);
+                        WriteFolder(kvp.Key, bPath, dir,
+                            $"→ position {kvp.Value}", null);
+                    }
                 }
                 break;
 

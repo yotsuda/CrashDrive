@@ -29,6 +29,9 @@ Related: splash - https://github.com/yotsuda/splash (npm: @ytsuda/splash)
         'Get-CrashObject'
         'Get-CrashLocalVariable'
         'Invoke-CrashCommand'
+        'New-TtdBookmark'
+        'Get-TtdBookmark'
+        'Remove-TtdBookmark'
     )
     FunctionsToExport    = @()
     AliasesToExport      = @()
