@@ -265,11 +265,12 @@ public sealed class NewCrashDriveCmdlet : PSCmdlet
 
     private void RunDotnetTracer(string executable, string[] programArgs, string outputPath)
     {
-        // Locate the tracer DLL next to this assembly (deploy.ps1 puts both
-        // CrashDrive.dll and CrashDrive.Tracer.Startup.dll in the same folder).
+        // Locate the tracer DLL in the module's bin\ subfolder. deploy.ps1
+        // routes third-party / tracer assemblies there to keep the module
+        // root uncluttered; the main CrashDrive.dll is one level above.
         var moduleDir = System.IO.Path.GetDirectoryName(
             typeof(NewCrashDriveCmdlet).Assembly.Location)!;
-        var tracerDll = System.IO.Path.Combine(moduleDir, "CrashDrive.Tracer.Startup.dll");
+        var tracerDll = System.IO.Path.Combine(moduleDir, "bin", "CrashDrive.Tracer.Startup.dll");
         if (!File.Exists(tracerDll))
             throw new FileNotFoundException(
                 $"Tracer DLL not found at {tracerDll}. Re-run deploy.ps1.");

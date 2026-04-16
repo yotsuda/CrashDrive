@@ -8,6 +8,13 @@
     PowerShellVersion    = '7.4'
     CompatiblePSEditions = @('Core')
 
+    # Pre-loaded before RootModule so CrashDrive.dll's refs to these resolve
+    # from bin\ rather than needing them in the module root.
+    RequiredAssemblies   = @(
+        'bin\Microsoft.Diagnostics.Runtime.dll'
+        'bin\Microsoft.Diagnostics.NETCore.Client.dll'
+    )
+
     CmdletsToExport      = @(
         'New-CrashDrive'
         'Enable-CrashEditorFollow'

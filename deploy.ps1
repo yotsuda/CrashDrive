@@ -2,7 +2,21 @@
 <#
 .SYNOPSIS
     Build and deploy the CrashDrive module to the local PowerShell Modules directory.
-    Builds both the main provider DLL and the startup-hook tracer DLL.
+
+    Layout:
+        <module>\
+            CrashDrive.psd1
+            CrashDrive.Format.ps1xml
+            CrashDrive.dll              (RootModule)
+            CrashDrive.pdb              (managed-source-resolution fallback)
+            NOTICES
+            bin\
+                0Harmony.dll
+                CrashDrive.Tracer.Startup.dll
+                CrashDrive.Tracer.Startup.pdb
+                Microsoft.Diagnostics.NETCore.Client.dll
+                Microsoft.Diagnostics.Runtime.dll
+                System.Text.Json.dll
 #>
 param(
     [ValidateSet('Debug', 'Release')]
@@ -30,40 +44,50 @@ if (Test-Path $ModulePath) {
 } else {
     New-Item -Path $ModulePath -ItemType Directory -Force | Out-Null
 }
+$binPath = Join-Path $ModulePath 'bin'
+New-Item -Path $binPath -ItemType Directory -Force | Out-Null
 
+# ── Module root: manifest, format data, main DLL + PDB, NOTICES ────────
 Copy-Item (Join-Path $moduleSource 'CrashDrive.psd1')          $ModulePath
 Copy-Item (Join-Path $moduleSource 'CrashDrive.Format.ps1xml') $ModulePath
 
-$mainOutput   = Join-Path $projectDir "src\CrashDrive\bin\$Configuration\net8.0"
-$tracerOutput = Join-Path $projectDir "src\CrashDrive.Tracer.Startup\bin\$Configuration\net6.0"
+$notices = Join-Path $projectDir 'NOTICES'
+if (Test-Path $notices) { Copy-Item $notices $ModulePath }
 
+$mainOutput = Join-Path $projectDir "src\CrashDrive\bin\$Configuration\net8.0"
 Copy-Item (Join-Path $mainOutput 'CrashDrive.dll') $ModulePath
-# PDB too: managed-frame source resolution needs it next to the DLL when
-# the compile-time path is gone (self-dump from another machine, etc.).
-$pdb = Join-Path $mainOutput 'CrashDrive.pdb'
-if (Test-Path $pdb) { Copy-Item $pdb $ModulePath }
+# CrashDrive.pdb stays next to CrashDrive.dll because managed-frame source
+# resolution falls back to Path.ChangeExtension(module.Name, ".pdb") when
+# the compile-time PDB path is gone (self-dump from another machine).
+$mainPdb = Join-Path $mainOutput 'CrashDrive.pdb'
+if (Test-Path $mainPdb) { Copy-Item $mainPdb $ModulePath }
 
-# Dependencies for the main DLL.
+# ── bin\ : third-party DLLs + tracer ───────────────────────────────────
+# Main DLL's runtime dependencies. Pre-loaded via psd1 RequiredAssemblies.
 @(
     'Microsoft.Diagnostics.Runtime.dll',
     'Microsoft.Diagnostics.NETCore.Client.dll'
 ) | ForEach-Object {
     $src = Join-Path $mainOutput $_
-    if (Test-Path $src) { Copy-Item $src $ModulePath }
+    if (Test-Path $src) { Copy-Item $src $binPath }
 }
 
-# Tracer DLL + its Harmony dep. Must live next to CrashDrive.dll because
-# NewCrashDriveCmdlet locates the tracer via typeof(this).Assembly.Location.
-Copy-Item (Join-Path $tracerOutput 'CrashDrive.Tracer.Startup.dll') $ModulePath
+# Tracer DLL + its Harmony dep. Located at runtime via
+# Path.Combine(moduleDir, "bin", "CrashDrive.Tracer.Startup.dll") in the
+# New-CrashDrive cmdlet. StartupHook's AssemblyResolve handler then loads
+# 0Harmony.dll from the same bin\ directory when the target process runs.
+$tracerOutput = Join-Path $projectDir "src\CrashDrive.Tracer.Startup\bin\$Configuration\net6.0"
+Copy-Item (Join-Path $tracerOutput 'CrashDrive.Tracer.Startup.dll') $binPath
 $tracerPdb = Join-Path $tracerOutput 'CrashDrive.Tracer.Startup.pdb'
-if (Test-Path $tracerPdb) { Copy-Item $tracerPdb $ModulePath }
-Copy-Item (Join-Path $tracerOutput '0Harmony.dll') $ModulePath
-# System.Text.Json: the tracer's net6.0 build ships it. On net6.0+ targets
-# the runtime provides System.Text.Json so we don't strictly need it, but
-# copying avoids a potential TypeLoad when the target apps pins an older
-# version in its deps.json. Small (~600 KB), worth the safety margin.
+if (Test-Path $tracerPdb) { Copy-Item $tracerPdb $binPath }
+Copy-Item (Join-Path $tracerOutput '0Harmony.dll') $binPath
+# System.Text.Json: safety margin in case the target app pins an older
+# version; small (~600 KB).
 $stjDll = Join-Path $tracerOutput 'System.Text.Json.dll'
-if (Test-Path $stjDll) { Copy-Item $stjDll $ModulePath }
+if (Test-Path $stjDll) { Copy-Item $stjDll $binPath }
 
 Write-Host "Deployed to $ModulePath" -ForegroundColor Green
-Get-ChildItem $ModulePath | Format-Table Name, Length -AutoSize
+Write-Host "Root:"
+Get-ChildItem $ModulePath -File | Format-Table Name, Length -AutoSize
+Write-Host "bin\:"
+Get-ChildItem $binPath | Format-Table Name, Length -AutoSize
