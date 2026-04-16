@@ -60,7 +60,7 @@ public sealed class TtdProvider : ProviderBase
 
     private enum PathKind
     {
-        Root, Summary, Info, Timeline,
+        Root, Summary, Timeline,
         EventsFolder, EventFile,
         PositionsFolder,                            // positions/
         PositionFolder,                             // positions/<pos>/
@@ -108,7 +108,6 @@ public sealed class TtdProvider : ProviderBase
             return head switch
             {
                 "summary.json" => new(PathKind.Summary, segs),
-                "info.json" => new(PathKind.Info, segs),
                 "timeline.json" => new(PathKind.Timeline, segs),
                 "ttd-events" => new(PathKind.EventsFolder, segs),
                 "positions" => new(PathKind.PositionsFolder, segs),
@@ -311,7 +310,7 @@ public sealed class TtdProvider : ProviderBase
                 }
                 break;
 
-            case PathKind.Summary or PathKind.Info or PathKind.Timeline
+            case PathKind.Summary or PathKind.Timeline
                 or PathKind.PositionInfoFile or PathKind.PositionThreadInfoFile:
                 WriteFile(name, path, dir);
                 break;
@@ -402,7 +401,6 @@ public sealed class TtdProvider : ProviderBase
         {
             case PathKind.Root:
                 yield return ("summary.json", false);
-                yield return ("info.json", false);
                 yield return ("timeline.json", false);
                 yield return ("ttd-events", true);
                 yield return ("positions", true);
@@ -501,7 +499,6 @@ public sealed class TtdProvider : ProviderBase
         {
             case PathKind.Root:
                 WriteFile("summary.json", MakePath(path, "summary.json"), dir);
-                WriteFile("info.json", MakePath(path, "info.json"), dir);
                 WriteFile("timeline.json", MakePath(path, "timeline.json"), dir);
                 WriteFolder("ttd-events", MakePath(path, "ttd-events"), dir,
                     "notable events during recording", Store.Summary.EventCount);
@@ -669,7 +666,6 @@ public sealed class TtdProvider : ProviderBase
         return info.Kind switch
         {
             PathKind.Summary => JsonSerializer.Serialize(Store.Summary, TraceJson.Options),
-            PathKind.Info => JsonSerializer.Serialize(Store.Summary, TraceJson.Options),
             PathKind.Timeline => JsonSerializer.Serialize(new
             {
                 Store.Summary.LifetimeStart,

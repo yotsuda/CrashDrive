@@ -63,7 +63,7 @@ public sealed class DumpProvider : ProviderBase
 
     private enum PathKind
     {
-        Root, Summary, Info,
+        Root, Summary,
         ThreadsFolder, ThreadFolder, ThreadInfo, ThreadStack, ThreadException,
         ThreadFramesFolder, FrameFile,
         ModulesFolder, ModuleFile,
@@ -90,7 +90,6 @@ public sealed class DumpProvider : ProviderBase
             return head switch
             {
                 "summary.json" => new(PathKind.Summary, segs),
-                "info.json" => new(PathKind.Info, segs),
                 "threads" => new(PathKind.ThreadsFolder, segs),
                 "modules" => new(PathKind.ModulesFolder, segs),
                 "heap" => new(PathKind.HeapFolder, segs),
@@ -234,9 +233,8 @@ public sealed class DumpProvider : ProviderBase
                 }
                 break;
 
-            case PathKind.Summary or PathKind.Info
-                or PathKind.ThreadInfo or PathKind.ThreadStack or PathKind.ThreadException
-                or PathKind.HeapTypeFile:
+            case PathKind.Summary or PathKind.ThreadInfo or PathKind.ThreadStack
+                or PathKind.ThreadException or PathKind.HeapTypeFile:
                 WriteFile(name, path, dir);
                 break;
 
@@ -276,7 +274,6 @@ public sealed class DumpProvider : ProviderBase
         {
             case PathKind.Root:
                 yield return ("summary.json", false);
-                yield return ("info.json", false);
                 yield return ("threads", true);
                 yield return ("modules", true);
                 yield return ("heap", true);
@@ -323,7 +320,6 @@ public sealed class DumpProvider : ProviderBase
         {
             case PathKind.Root:
                 WriteFile("summary.json", MakePath(path, "summary.json"), dir);
-                WriteFile("info.json", MakePath(path, "info.json"), dir);
                 WriteFolder("threads", MakePath(path, "threads"), dir,
                     "threads at time of dump", Store.Summary.ThreadCount);
                 WriteFolder("modules", MakePath(path, "modules"), dir,
@@ -420,8 +416,7 @@ public sealed class DumpProvider : ProviderBase
         var info = Parse(normalizedPath);
         return info.Kind switch
         {
-            PathKind.Summary or PathKind.Info
-                => JsonSerializer.Serialize(Store.Summary, TraceJson.Options),
+            PathKind.Summary => JsonSerializer.Serialize(Store.Summary, TraceJson.Options),
             PathKind.ThreadInfo when info.ThreadId is int tid
                 => Store.Threads.FirstOrDefault(x => x.ManagedThreadId == tid) is { } t
                     ? JsonSerializer.Serialize(t, TraceJson.Options) : "{}",

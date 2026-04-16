@@ -58,7 +58,7 @@ public sealed class TraceProvider : ProviderBase
 
     private enum PathKind
     {
-        Root, Summary, Stdout, Stderr,
+        Root, Summary,
         EventsFolder, EventFile,
         ByTypeFolder, ByTypeCategory, ByTypeEvent,
         ByFunctionFolder, ByFunctionCategory, ByFunctionEvent,
@@ -84,8 +84,6 @@ public sealed class TraceProvider : ProviderBase
             return head switch
             {
                 "summary.json" => new(PathKind.Summary, segs),
-                "stdout.txt" => new(PathKind.Stdout, segs),
-                "stderr.txt" => new(PathKind.Stderr, segs),
                 "events" => new(PathKind.EventsFolder, segs),
                 "by-type" => new(PathKind.ByTypeFolder, segs),
                 "by-function" => new(PathKind.ByFunctionFolder, segs),
@@ -218,8 +216,6 @@ public sealed class TraceProvider : ProviderBase
         {
             case PathKind.Root:
                 yield return ("summary.json", false);
-                yield return ("stdout.txt", false);
-                yield return ("stderr.txt", false);
                 yield return ("events", true);
                 yield return ("by-type", true);
                 yield return ("by-function", true);
@@ -260,8 +256,6 @@ public sealed class TraceProvider : ProviderBase
         {
             case PathKind.Root:
                 WriteFile("summary.json", MakePath(path, "summary.json"), directory);
-                WriteFile("stdout.txt", MakePath(path, "stdout.txt"), directory);
-                WriteFile("stderr.txt", MakePath(path, "stderr.txt"), directory);
                 WriteFolder("events", MakePath(path, "events"), directory,
                     "all events by sequence", Store.Summary.TotalEvents);
                 WriteFolder("by-type", MakePath(path, "by-type"), directory,
@@ -352,7 +346,6 @@ public sealed class TraceProvider : ProviderBase
         return info.Kind switch
         {
             PathKind.Summary => JsonSerializer.Serialize(Store.Summary, TraceJson.Options),
-            PathKind.Stdout or PathKind.Stderr => "",
             PathKind.EventFile or PathKind.ByTypeEvent or PathKind.ByFunctionEvent
                 => info.Seq is int s && Store.BySeq.TryGetValue(s, out var ev)
                     ? JsonSerializer.Serialize(ev, TraceJson.Options) : "{}",
