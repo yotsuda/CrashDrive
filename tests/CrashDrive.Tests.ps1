@@ -79,6 +79,31 @@ Describe 'Dump provider' -Tag 'Dump' -Skip:(-not $HasDump) {
         $triage | Should -Match '## Where to look next'
     }
 
+    It 'auto-classifies threads by state and exception' {
+        # self.dmp is a snapshot of pwsh with CrashDrive loaded; no managed
+        # exceptions expected, but 1 finalizer thread and several dead threads
+        # should be present (GC background + terminated workers).
+        New-CrashDrive smoke_dump $DumpPath
+
+        $threadsRoot = (Get-ChildItem smoke_dump:\threads).Name
+        # by-state should appear as a classifier folder
+        $threadsRoot | Should -Contain 'by-state'
+
+        # finalizer / dead are expected; only nonempty categories listed
+        $categories = (Get-ChildItem smoke_dump:\threads\by-state).Name
+        $categories | Should -Contain 'finalizer'
+
+        # drill-in reuses the normal threads\<id>\ tree
+        $finalizers = Get-ChildItem smoke_dump:\threads\by-state\finalizer
+        $finalizers.Count | Should -BeGreaterThan 0
+        $finalizers[0].IsFinalizer | Should -BeTrue
+
+        $contents = (Get-ChildItem ("smoke_dump:\threads\by-state\finalizer\" +
+                                    $finalizers[0].ManagedThreadId)).Name
+        $contents | Should -Contain 'info.json'
+        $contents | Should -Contain 'frames'
+    }
+
     It 'reads summary.json as JSON' {
         New-CrashDrive smoke_dump $DumpPath
         $json = (Get-Content smoke_dump:\summary.json) -join "`n" | ConvertFrom-Json

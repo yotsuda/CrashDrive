@@ -66,6 +66,9 @@ public sealed class DumpProvider : ProviderBase
         Root, Summary, Analyze, Triage,
         ThreadsFolder, ThreadFolder, ThreadInfo, ThreadStack, ThreadException, ThreadRegisters,
         ThreadFramesFolder, FrameFile,
+        ThreadsWithExceptionFolder,                 // threads/with-exception/
+        ThreadsByStateFolder,                       // threads/by-state/
+        ThreadsByStateCategoryFolder,               // threads/by-state/<state>/
         ModulesFolder, ModuleFile,
         HeapFolder, HeapTypesFolder, HeapTypeFile,
         Invalid,
@@ -77,7 +80,21 @@ public sealed class DumpProvider : ProviderBase
         int? ThreadId = null,
         int? FrameIndex = null,
         string? ModuleFile = null,
-        string? TypeName = null);
+        string? TypeName = null,
+        string? State = null);
+
+    // Thread classification states exposed under threads\by-state\. The set is
+    // deliberately narrow — things that can be computed from existing
+    // DumpThreadInfo flags without walking frames.
+    private static readonly string[] ThreadStates = { "finalizer", "gc", "dead" };
+
+    private static bool MatchesState(DumpThreadInfo t, string state) => state switch
+    {
+        "finalizer" => t.IsFinalizer,
+        "gc"        => t.IsGC,
+        "dead"      => !t.IsAlive,
+        _ => false,
+    };
 
     private ParsedPath Parse(string path)
     {
@@ -101,6 +118,42 @@ public sealed class DumpProvider : ProviderBase
 
         if (head == "threads")
         {
+            // Classifier paths: resolve to the direct threads\<id>\… form via
+            // a synthetic re-parse. Kept here instead of in each leaf's Parse
+            // case so the rewrite is one place.
+            if (segs.Length >= 2 && segs[1].Equals("with-exception", StringComparison.OrdinalIgnoreCase))
+            {
+                if (segs.Length == 2) return new(PathKind.ThreadsWithExceptionFolder, segs);
+                if (int.TryParse(segs[2], out var wxTid)
+                    && Store.Threads.FirstOrDefault(t => t.ManagedThreadId == wxTid)?.CurrentException != null)
+                {
+                    var synthetic = "threads/" + string.Join('/', segs.Skip(2));
+                    var resolved = Parse(synthetic);
+                    return resolved.Kind == PathKind.Invalid
+                        ? resolved
+                        : resolved with { Segments = segs };
+                }
+                return new(PathKind.Invalid, segs);
+            }
+            if (segs.Length >= 2 && segs[1].Equals("by-state", StringComparison.OrdinalIgnoreCase))
+            {
+                if (segs.Length == 2) return new(PathKind.ThreadsByStateFolder, segs);
+                var state = segs[2].ToLowerInvariant();
+                if (!ThreadStates.Contains(state)) return new(PathKind.Invalid, segs);
+                if (segs.Length == 3) return new(PathKind.ThreadsByStateCategoryFolder, segs, State: state);
+                if (int.TryParse(segs[3], out var bsTid)
+                    && Store.Threads.FirstOrDefault(t => t.ManagedThreadId == bsTid) is { } matchT
+                    && MatchesState(matchT, state))
+                {
+                    var synthetic = "threads/" + string.Join('/', segs.Skip(3));
+                    var resolved = Parse(synthetic);
+                    return resolved.Kind == PathKind.Invalid
+                        ? resolved
+                        : resolved with { Segments = segs };
+                }
+                return new(PathKind.Invalid, segs);
+            }
+
             if (!int.TryParse(segs[1], out var tid)) return new(PathKind.Invalid, segs);
             if (segs.Length == 2) return new(PathKind.ThreadFolder, segs, ThreadId: tid);
             var sub = segs[2].ToLowerInvariant();
@@ -166,7 +219,9 @@ public sealed class DumpProvider : ProviderBase
         {
             PathKind.Root or PathKind.ThreadsFolder or PathKind.ThreadFolder or
             PathKind.ThreadFramesFolder or PathKind.ModulesFolder or
-            PathKind.HeapFolder or PathKind.HeapTypesFolder => true,
+            PathKind.HeapFolder or PathKind.HeapTypesFolder or
+            PathKind.ThreadsWithExceptionFolder or PathKind.ThreadsByStateFolder or
+            PathKind.ThreadsByStateCategoryFolder => true,
             _ => false,
         };
     }
@@ -329,7 +384,29 @@ public sealed class DumpProvider : ProviderBase
                     yield return ($"{SanitizeFull(t.TypeName)}.json", false);
                 break;
             case PathKind.ThreadsFolder:
+                // Classifier containers come first so ls shows them above the
+                // numeric IDs. Omit ones with zero matches to avoid dead ends.
+                if (Store.Threads.Any(t => t.CurrentException != null))
+                    yield return ("with-exception", true);
+                if (ThreadStates.Any(s => Store.Threads.Any(t => MatchesState(t, s))))
+                    yield return ("by-state", true);
                 foreach (var t in Store.Threads)
+                    yield return (t.ManagedThreadId.ToString(), true);
+                break;
+
+            case PathKind.ThreadsWithExceptionFolder:
+                foreach (var t in Store.Threads.Where(x => x.CurrentException != null))
+                    yield return (t.ManagedThreadId.ToString(), true);
+                break;
+
+            case PathKind.ThreadsByStateFolder:
+                foreach (var st in ThreadStates)
+                    if (Store.Threads.Any(t => MatchesState(t, st)))
+                        yield return (st, true);
+                break;
+
+            case PathKind.ThreadsByStateCategoryFolder when info.State != null:
+                foreach (var t in Store.Threads.Where(x => MatchesState(x, info.State)))
                     yield return (t.ManagedThreadId.ToString(), true);
                 break;
             case PathKind.ThreadFolder:
@@ -396,24 +473,46 @@ public sealed class DumpProvider : ProviderBase
                 }
                 break;
             case PathKind.ThreadsFolder:
+                if (Store.Threads.Any(x => x.CurrentException != null))
+                {
+                    var cnt = Store.Threads.Count(x => x.CurrentException != null);
+                    WriteFolder("with-exception", MakePath(path, "with-exception"), dir,
+                        "threads with CurrentException != null", cnt);
+                }
+                if (ThreadStates.Any(s => Store.Threads.Any(x => MatchesState(x, s))))
+                    WriteFolder("by-state", MakePath(path, "by-state"), dir,
+                        "synthetic classifiers: finalizer, gc, dead", null);
                 foreach (var t in Store.Threads)
                 {
                     if (Stopping) return;
-                    var tPath = MakePath(path, t.ManagedThreadId.ToString());
-                    var item = new ThreadItem
-                    {
-                        ManagedThreadId = t.ManagedThreadId,
-                        OSThreadId = t.OSThreadId,
-                        GCMode = t.GCMode,
-                        IsAlive = t.IsAlive,
-                        IsFinalizer = t.IsFinalizer,
-                        FrameCount = t.Frames.Count,
-                        ExceptionSummary = t.CurrentException != null
-                            ? $"{t.CurrentException.TypeName}: {t.CurrentException.Message}" : null,
-                        Path = EnsureDrivePrefix(tPath),
-                        Directory = dir,
-                    };
-                    WriteItemObject(item, tPath, isContainer: true);
+                    WriteThreadItem(t, path, dir);
+                }
+                break;
+
+            case PathKind.ThreadsWithExceptionFolder:
+                foreach (var t in Store.Threads.Where(x => x.CurrentException != null))
+                {
+                    if (Stopping) return;
+                    WriteThreadItem(t, path, dir);
+                }
+                break;
+
+            case PathKind.ThreadsByStateFolder:
+                foreach (var st in ThreadStates)
+                {
+                    if (Stopping) return;
+                    var cnt = Store.Threads.Count(t => MatchesState(t, st));
+                    if (cnt == 0) continue;
+                    WriteFolder(st, MakePath(path, st), dir,
+                        $"threads matching '{st}'", cnt);
+                }
+                break;
+
+            case PathKind.ThreadsByStateCategoryFolder when info.State != null:
+                foreach (var t in Store.Threads.Where(x => MatchesState(x, info.State)))
+                {
+                    if (Stopping) return;
+                    WriteThreadItem(t, path, dir);
                 }
                 break;
             case PathKind.ThreadFolder:
@@ -668,6 +767,27 @@ public sealed class DumpProvider : ProviderBase
                 sb.Append('_');
         }
         return sb.ToString();
+    }
+
+    /// <summary>Shared emit for a thread row — used by the flat
+    /// threads\ listing and by the two classifier listings
+    /// (with-exception, by-state\&lt;s&gt;\).</summary>
+    private void WriteThreadItem(DumpThreadInfo t, string path, string dir)
+    {
+        var tPath = MakePath(path, t.ManagedThreadId.ToString());
+        WriteItemObject(new ThreadItem
+        {
+            ManagedThreadId = t.ManagedThreadId,
+            OSThreadId = t.OSThreadId,
+            GCMode = t.GCMode,
+            IsAlive = t.IsAlive,
+            IsFinalizer = t.IsFinalizer,
+            FrameCount = t.Frames.Count,
+            ExceptionSummary = t.CurrentException != null
+                ? $"{t.CurrentException.TypeName}: {t.CurrentException.Message}" : null,
+            Path = EnsureDrivePrefix(tPath),
+            Directory = dir,
+        }, tPath, isContainer: true);
     }
 
     private void WriteFolder(string name, string itemPath, string directory, string desc, int? count)
