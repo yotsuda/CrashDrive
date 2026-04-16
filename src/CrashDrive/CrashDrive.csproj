@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>CrashDrive</RootNamespace>
     <AssemblyName>CrashDrive</AssemblyName>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <Product>CrashDrive</Product>
     <Description>PowerShell provider that mounts execution trace files and crash dumps as PSDrives. Post-mortem inspection of what a program actually did.</Description>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>

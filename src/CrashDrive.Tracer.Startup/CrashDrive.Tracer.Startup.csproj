@@ -8,7 +8,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>CrashDrive.Tracer.Startup</RootNamespace>
     <AssemblyName>CrashDrive.Tracer.Startup</AssemblyName>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <Product>CrashDrive Tracer</Product>
     <Description>Harmony-based runtime tracer for CrashDrive. Loaded via DOTNET_STARTUP_HOOKS; emits CrashDrive-compatible JSONL.</Description>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
