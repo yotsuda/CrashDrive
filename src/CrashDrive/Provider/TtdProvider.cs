@@ -90,6 +90,9 @@ public sealed class TtdProvider : ProviderBase
         MemoryRangeFolder,                          // memory/<start>_<end>/
         MemoryAccessKindFolder,                     // memory/<range>/{writes,reads,rw}/
         MemoryAccessFile,                           // memory/<range>/<kind>/<n>.json
+        MemoryFirstWriteFile,                       // memory/<range>/first-write.json
+        MemoryLastWriteBeforeFolder,                // memory/<range>/last-write-before/
+        MemoryLastWriteBeforeFile,                  // memory/<range>/last-write-before/<encoded-pos>.json
 
         Invalid,
     }
@@ -216,15 +219,33 @@ public sealed class TtdProvider : ProviderBase
             var end = range[(sep + 1)..];
 
             if (segs.Length == 2) return new(PathKind.MemoryRangeFolder, segs, MemStart: start, MemEnd: end);
-            if (segs.Length == 3 && segs[2] is "writes" or "reads" or "rw")
-                return new(PathKind.MemoryAccessKindFolder, segs,
-                    MemStart: start, MemEnd: end, AccessMode: ModeFromFolder(segs[2]));
-            if (segs.Length == 4 && segs[2] is "writes" or "reads" or "rw"
-                && segs[3].EndsWith(".json", StringComparison.OrdinalIgnoreCase)
-                && int.TryParse(segs[3][..^5], out var memIdx))
-                return new(PathKind.MemoryAccessFile, segs,
-                    MemStart: start, MemEnd: end,
-                    AccessMode: ModeFromFolder(segs[2]), Index: memIdx);
+            if (segs.Length == 3)
+            {
+                if (segs[2] is "writes" or "reads" or "rw")
+                    return new(PathKind.MemoryAccessKindFolder, segs,
+                        MemStart: start, MemEnd: end, AccessMode: ModeFromFolder(segs[2]));
+                if (segs[2].Equals("first-write.json", StringComparison.OrdinalIgnoreCase))
+                    return new(PathKind.MemoryFirstWriteFile, segs, MemStart: start, MemEnd: end);
+                if (segs[2].Equals("last-write-before", StringComparison.OrdinalIgnoreCase))
+                    return new(PathKind.MemoryLastWriteBeforeFolder, segs, MemStart: start, MemEnd: end);
+            }
+            if (segs.Length == 4)
+            {
+                if (segs[2] is "writes" or "reads" or "rw"
+                    && segs[3].EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                    && int.TryParse(segs[3][..^5], out var memIdx))
+                    return new(PathKind.MemoryAccessFile, segs,
+                        MemStart: start, MemEnd: end,
+                        AccessMode: ModeFromFolder(segs[2]), Index: memIdx);
+                if (segs[2].Equals("last-write-before", StringComparison.OrdinalIgnoreCase)
+                    && segs[3].EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                {
+                    var encPos = segs[3][..^5];
+                    if (Ttd.TtdPosition.IsValid(encPos))
+                        return new(PathKind.MemoryLastWriteBeforeFile, segs,
+                            MemStart: start, MemEnd: end, EncodedPosition: encPos);
+                }
+            }
         }
 
         return new(PathKind.Invalid, segs);
@@ -267,6 +288,12 @@ public sealed class TtdProvider : ProviderBase
             PathKind.MemoryAccessFile when info.MemStart != null && info.MemEnd != null
                 && info.AccessMode != null && info.Index is int mi
                 => mi >= 0 && mi < Store.GetMemoryAccesses(info.MemStart, info.MemEnd, info.AccessMode).Count,
+            PathKind.MemoryFirstWriteFile when info.MemStart != null && info.MemEnd != null
+                => Store.GetFirstWrite(info.MemStart, info.MemEnd) != null,
+            PathKind.MemoryLastWriteBeforeFile when info.MemStart != null && info.MemEnd != null
+                    && info.EncodedPosition != null
+                => Store.GetLastWriteBefore(info.MemStart, info.MemEnd,
+                    ResolvePosition(info.EncodedPosition)) != null,
             _ => true,
         };
     }
@@ -284,7 +311,8 @@ public sealed class TtdProvider : ProviderBase
             PathKind.CallsFolder or PathKind.CallsModuleFolder or
             PathKind.CallsFunctionFolder or
             PathKind.MemoryFolder or PathKind.MemoryRangeFolder or
-            PathKind.MemoryAccessKindFolder => true,
+            PathKind.MemoryAccessKindFolder or
+            PathKind.MemoryLastWriteBeforeFolder => true,
             _ => false,
         };
     }
@@ -348,6 +376,24 @@ public sealed class TtdProvider : ProviderBase
                         AccessType = r.AccessType, Address = r.Address, Value = r.Value,
                         Path = EnsureDrivePrefix(path), Directory = dir,
                     }, path, isContainer: false);
+                }
+                break;
+
+            case PathKind.MemoryFirstWriteFile when info.MemStart != null && info.MemEnd != null:
+                {
+                    var first = Store.GetFirstWrite(info.MemStart, info.MemEnd);
+                    if (first != null)
+                        WriteMemoryItem(first, name, path, dir);
+                }
+                break;
+
+            case PathKind.MemoryLastWriteBeforeFile when info.MemStart != null && info.MemEnd != null
+                    && info.EncodedPosition != null:
+                {
+                    var last = Store.GetLastWriteBefore(info.MemStart, info.MemEnd,
+                        ResolvePosition(info.EncodedPosition));
+                    if (last != null)
+                        WriteMemoryItem(last, name, path, dir);
                 }
                 break;
 
@@ -576,6 +622,12 @@ public sealed class TtdProvider : ProviderBase
                 yield return ("writes", true);
                 yield return ("reads", true);
                 yield return ("rw", true);
+                yield return ("first-write.json", false);
+                yield return ("last-write-before", true);
+                break;
+
+            case PathKind.MemoryLastWriteBeforeFolder:
+                // Positions aren't enumerable in advance — callers specify by name.
                 break;
 
             case PathKind.MemoryAccessKindFolder:
@@ -679,6 +731,9 @@ public sealed class TtdProvider : ProviderBase
                 WriteFolder("writes", MakePath(path, "writes"), dir, "memory writes to this range", null);
                 WriteFolder("reads", MakePath(path, "reads"), dir, "memory reads from this range", null);
                 WriteFolder("rw", MakePath(path, "rw"), dir, "reads and writes combined", null);
+                WriteFile("first-write.json", MakePath(path, "first-write.json"), dir);
+                WriteFolder("last-write-before", MakePath(path, "last-write-before"), dir,
+                    "pick the last write before <position>.json (position is path-encoded, e.g. 1CBF_8C1)", null);
                 break;
 
             case PathKind.MemoryAccessKindFolder:
@@ -847,6 +902,18 @@ public sealed class TtdProvider : ProviderBase
                     && info.AccessMode != null && info.Index is int memIdx
                 => SerializeMemoryAccess(info.MemStart, info.MemEnd, info.AccessMode, memIdx),
 
+            PathKind.MemoryFirstWriteFile when info.MemStart != null && info.MemEnd != null
+                => JsonSerializer.Serialize(
+                    Store.GetFirstWrite(info.MemStart, info.MemEnd) ?? (object)new { },
+                    TraceJson.Options),
+
+            PathKind.MemoryLastWriteBeforeFile when info.MemStart != null && info.MemEnd != null
+                    && info.EncodedPosition != null
+                => JsonSerializer.Serialize(
+                    Store.GetLastWriteBefore(info.MemStart, info.MemEnd,
+                        ResolvePosition(info.EncodedPosition)) ?? (object)new { },
+                    TraceJson.Options),
+
             _ => "",
         };
     }
@@ -891,6 +958,21 @@ public sealed class TtdProvider : ProviderBase
         var f = frames.FirstOrDefault(x => x.Index == frameIndex);
         return f != null
             ? JsonSerializer.Serialize(f, TraceJson.Options) : "{}";
+    }
+
+    private void WriteMemoryItem(TtdMemoryAccess r, string name, string itemPath, string directory)
+    {
+        WriteItemObject(new Models.TtdMemoryItem
+        {
+            Index = r.Index,
+            Name = name,
+            Position = r.TimeStart,
+            AccessType = r.AccessType,
+            Address = r.Address,
+            Value = r.Value,
+            Path = EnsureDrivePrefix(itemPath),
+            Directory = directory,
+        }, itemPath, isContainer: false);
     }
 
     private void WriteEventItem(TtdEventWithIndex entry, string name, string itemPath, string directory)

@@ -258,6 +258,34 @@ public sealed class TtdStore : IStore
         return (IReadOnlyList<TtdMemoryAccess>)result;
     });
 
+    // ─── Single-record convenience picks ─────────────────────────────
+    //
+    // "first write" / "last write before pos" are the reverse-lookup primitives
+    // that make TTD worth its weight: "where was this pointer set?" / "what
+    // was the last thing that stomped on this field before the crash?" Both
+    // are thin wrappers over GetMemoryAccesses — we pull a larger window and
+    // pick client-side by TimeStart using the position comparer.
+
+    private const int PickMaxRecords = 10_000;
+
+    public TtdMemoryAccess? GetFirstWrite(string startAddrHex, string endAddrHex)
+    {
+        var recs = GetMemoryAccesses(startAddrHex, endAddrHex, "w", PickMaxRecords);
+        return recs.Count > 0 ? recs[0] : null;
+    }
+
+    public TtdMemoryAccess? GetLastWriteBefore(string startAddrHex, string endAddrHex, string position)
+    {
+        var recs = GetMemoryAccesses(startAddrHex, endAddrHex, "w", PickMaxRecords);
+        TtdMemoryAccess? best = null;
+        foreach (var r in recs)
+        {
+            if (PositionComparer.Instance.Compare(r.TimeStart, position) >= 0) break;
+            best = r;
+        }
+        return best;
+    }
+
     /// <summary>
     /// Parse "dx -r2 expr.Select(...)" output where each element is a block of
     /// <c>    [0xN]</c> followed by indented <c>        Field : Value</c> lines.
