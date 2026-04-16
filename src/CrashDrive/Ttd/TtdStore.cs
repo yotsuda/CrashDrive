@@ -95,54 +95,132 @@ public sealed class TtdStore : IStore
     }
 
     /// <summary>
+    /// Query memory access history in an address range.
+    /// <paramref name="mode"/> is "r", "w", or "rw".
+    /// </summary>
+    public IReadOnlyList<TtdMemoryAccess> GetMemoryAccesses(
+        string startAddrHex, string endAddrHex, string mode, int maxRecords = 200)
+    {
+        var result = new List<TtdMemoryAccess>();
+        var baseExpr = $"@$cursession.TTD.Memory({startAddrHex}, {endAddrHex}, \"{mode}\")";
+
+        // Single dx call using Select() projection — orders of magnitude faster
+        // than querying each field individually.
+        var proj = $"{baseExpr}.Take({maxRecords}).Select(m => new {{ " +
+                   "T = m.ThreadId, P = m.TimeStart, K = m.AccessType, " +
+                   "A = m.Address, S = m.Size, V = m.Value, O = m.OverwrittenValue, I = m.IP })";
+
+        string text;
+        try { text = Session.Dx(proj, recursion: 2); }
+        catch { return result; }
+
+        foreach (var record in ParseProjectedRecords(text))
+        {
+            result.Add(new TtdMemoryAccess
+            {
+                Index = result.Count,
+                ThreadId = record.GetValueOrDefault("T", ""),
+                TimeStart = record.GetValueOrDefault("P", ""),
+                AccessType = record.GetValueOrDefault("K", ""),
+                Address = record.GetValueOrDefault("A", ""),
+                Size = record.GetValueOrDefault("S", ""),
+                Value = record.GetValueOrDefault("V", ""),
+                OverwrittenValue = record.GetValueOrDefault("O", ""),
+                IP = record.GetValueOrDefault("I", ""),
+            });
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Parse "dx -r2 expr.Select(...)" output where each element is a block of
+    /// <c>    [0xN]</c> followed by indented <c>        Field : Value</c> lines.
+    /// </summary>
+    private static IEnumerable<Dictionary<string, string>> ParseProjectedRecords(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) yield break;
+
+        Dictionary<string, string>? current = null;
+        foreach (var rawLine in text.Split('\n'))
+        {
+            var line = rawLine.TrimEnd('\r');
+            if (line.Length == 0) continue;
+
+            // New record: "    [0xN]" or "    [...]"
+            if (line.StartsWith("    [") && !line.StartsWith("        "))
+            {
+                if (current != null) yield return current;
+                current = new Dictionary<string, string>();
+                continue;
+            }
+
+            if (current == null) continue;
+
+            // Field line: "        Field            : Value"
+            if (!line.StartsWith("        ")) continue;
+            var trimmed = line.TrimStart();
+            var colonIdx = trimmed.IndexOf(':');
+            if (colonIdx <= 0) continue;
+            var key = trimmed[..colonIdx].Trim();
+            var value = trimmed[(colonIdx + 1)..].Trim();
+            if (!string.IsNullOrEmpty(key) && !current.ContainsKey(key))
+                current[key] = value;
+        }
+        if (current != null) yield return current;
+    }
+
+    /// <summary>
     /// Execute TTD.Calls("module!function") and return structured call records.
     /// Each record spans a time range (entry → exit) and carries argument registers
     /// plus the return value.
     /// </summary>
-    public IReadOnlyList<TtdCall> GetCalls(string module, string function)
+    public IReadOnlyList<TtdCall> GetCalls(string module, string function, int maxRecords = 500)
     {
         var result = new List<TtdCall>();
         var functionFullName = $"{module}!{function}";
+        var baseExpr = $"@$cursession.TTD.Calls(\"{functionFullName}\")";
 
-        int count;
-        try
-        {
-            count = ParseInt(ExtractScalar(
-                Session.Dx($"@$cursession.TTD.Calls(\"{functionFullName}\").Count()")));
-        }
+        // Projection gives all core fields in one dx call.
+        var proj = $"{baseExpr}.Take({maxRecords}).Select(c => new {{ " +
+                   "T = c.ThreadId, S = c.TimeStart, E = c.TimeEnd, " +
+                   "FA = c.FunctionAddress, RA = c.ReturnAddress, RV = c.ReturnValue })";
+
+        string text;
+        try { text = Session.Dx(proj, recursion: 2); }
         catch { return result; }
 
-        if (count == 0) return result;
-
-        for (int i = 0; i < Math.Min(count, 500); i++)
+        var idx = 0;
+        foreach (var record in ParseProjectedRecords(text))
         {
-            try
+            var call = new TtdCall
             {
-                var call = new TtdCall
-                {
-                    Index = i,
-                    Function = functionFullName,
-                    ThreadId = ExtractScalar(Session.Dx(
-                        $"@$cursession.TTD.Calls(\"{functionFullName}\")[{i}].ThreadId")),
-                    TimeStart = ExtractScalar(Session.Dx(
-                        $"@$cursession.TTD.Calls(\"{functionFullName}\")[{i}].TimeStart")),
-                    TimeEnd = ExtractScalar(Session.Dx(
-                        $"@$cursession.TTD.Calls(\"{functionFullName}\")[{i}].TimeEnd")),
-                    FunctionAddress = ExtractScalar(Session.Dx(
-                        $"@$cursession.TTD.Calls(\"{functionFullName}\")[{i}].FunctionAddress")),
-                    ReturnAddress = ExtractScalar(Session.Dx(
-                        $"@$cursession.TTD.Calls(\"{functionFullName}\")[{i}].ReturnAddress")),
-                    ReturnValue = ExtractScalar(Session.Dx(
-                        $"@$cursession.TTD.Calls(\"{functionFullName}\")[{i}].ReturnValue")),
-                };
-                // Parameters — iterate via .Select()
-                call.Parameters = ParseIdList(Session.Dx(
-                    $"@$cursession.TTD.Calls(\"{functionFullName}\")[{i}].Parameters.Select(p => p)", recursion: 1));
-                result.Add(call);
-            }
-            catch { /* skip malformed */ }
+                Index = idx++,
+                Function = functionFullName,
+                ThreadId = record.GetValueOrDefault("T", ""),
+                TimeStart = record.GetValueOrDefault("S", ""),
+                TimeEnd = record.GetValueOrDefault("E", ""),
+                FunctionAddress = record.GetValueOrDefault("FA", ""),
+                ReturnAddress = record.GetValueOrDefault("RA", ""),
+                ReturnValue = record.GetValueOrDefault("RV", ""),
+            };
+            // Fetch parameters lazily only for the requested index (when file is read)
+            // For folder enumeration we skip — avoids N×M queries.
+            result.Add(call);
         }
         return result;
+    }
+
+    /// <summary>Fetch the 4 register parameters for a specific call record.</summary>
+    public IReadOnlyList<string> GetCallParameters(string module, string function, int index)
+    {
+        var functionFullName = $"{module}!{function}";
+        try
+        {
+            return ParseIdList(Session.Dx(
+                $"@$cursession.TTD.Calls(\"{functionFullName}\")[{index}].Parameters.Select(p => p)",
+                recursion: 1));
+        }
+        catch { return []; }
     }
 
     /// <summary>Return stack frames for a thread id at the current position.</summary>
@@ -354,6 +432,19 @@ public sealed class TtdFrame
 {
     public int Index { get; set; }
     public string Description { get; set; } = "";
+}
+
+public sealed class TtdMemoryAccess
+{
+    public int Index { get; set; }
+    public string ThreadId { get; set; } = "";
+    public string TimeStart { get; set; } = "";
+    public string AccessType { get; set; } = "";
+    public string Address { get; set; } = "";
+    public string Size { get; set; } = "";
+    public string Value { get; set; } = "";
+    public string OverwrittenValue { get; set; } = "";
+    public string IP { get; set; } = "";
 }
 
 public sealed class TtdCall

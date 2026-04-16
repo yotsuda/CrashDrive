@@ -1,6 +1,6 @@
 @{
     RootModule           = 'CrashDrive.dll'
-    ModuleVersion        = '0.6.0'
+    ModuleVersion        = '0.7.0'
     GUID                 = 'b6f1e4d2-5a9c-4e83-91f4-7a3b6e2d8c4f'
     Author               = 'Yoshifumi Tsuda'
     Copyright            = '(c) Yoshifumi Tsuda. All rights reserved.'

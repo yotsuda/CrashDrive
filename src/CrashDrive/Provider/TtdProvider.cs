@@ -76,6 +76,11 @@ public sealed class TtdProvider : ProviderBase
         CallsFunctionFolder,                        // calls/<module>/<function>/
         CallFile,                                   // calls/<module>/<function>/<n>.json
 
+        MemoryFolder,                               // memory/
+        MemoryRangeFolder,                          // memory/<start>_<end>/
+        MemoryAccessKindFolder,                     // memory/<range>/{writes,reads,rw}/
+        MemoryAccessFile,                           // memory/<range>/<kind>/<n>.json
+
         Invalid,
     }
 
@@ -87,7 +92,10 @@ public sealed class TtdProvider : ProviderBase
         string? ThreadId = null,
         int? FrameIndex = null,
         string? Module = null,
-        string? Function = null);
+        string? Function = null,
+        string? MemStart = null,
+        string? MemEnd = null,
+        string? AccessMode = null);
 
     private ParsedPath Parse(string path)
     {
@@ -105,6 +113,7 @@ public sealed class TtdProvider : ProviderBase
                 "ttd-events" => new(PathKind.EventsFolder, segs),
                 "positions" => new(PathKind.PositionsFolder, segs),
                 "calls" => new(PathKind.CallsFolder, segs),
+                "memory" => new(PathKind.MemoryFolder, segs),
                 _ => new(PathKind.Invalid, segs),
             };
         }
@@ -159,8 +168,38 @@ public sealed class TtdProvider : ProviderBase
                 return new(PathKind.CallFile, segs, Module: segs[1], Function: segs[2], Index: callIdx);
         }
 
+        if (head == "memory")
+        {
+            // memory/<start>_<end>[/<mode>[/<n>.json]]
+            if (segs.Length < 2) return new(PathKind.Invalid, segs);
+            var range = segs[1];
+            var sep = range.IndexOf('_');
+            if (sep <= 0 || sep >= range.Length - 1) return new(PathKind.Invalid, segs);
+            var start = range[..sep];
+            var end = range[(sep + 1)..];
+
+            if (segs.Length == 2) return new(PathKind.MemoryRangeFolder, segs, MemStart: start, MemEnd: end);
+            if (segs.Length == 3 && segs[2] is "writes" or "reads" or "rw")
+                return new(PathKind.MemoryAccessKindFolder, segs,
+                    MemStart: start, MemEnd: end, AccessMode: ModeFromFolder(segs[2]));
+            if (segs.Length == 4 && segs[2] is "writes" or "reads" or "rw"
+                && segs[3].EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(segs[3][..^5], out var memIdx))
+                return new(PathKind.MemoryAccessFile, segs,
+                    MemStart: start, MemEnd: end,
+                    AccessMode: ModeFromFolder(segs[2]), Index: memIdx);
+        }
+
         return new(PathKind.Invalid, segs);
     }
+
+    private static string ModeFromFolder(string folder) => folder switch
+    {
+        "writes" => "w",
+        "reads" => "r",
+        "rw" => "rw",
+        _ => "w",
+    };
 
     /// <summary>Resolve an encoded position (including "start"/"end") to the native TTD form.</summary>
     private string ResolvePosition(string encoded) => encoded switch
@@ -184,7 +223,9 @@ public sealed class TtdProvider : ProviderBase
             PathKind.PositionThreadsFolder or PathKind.PositionThreadFolder or
             PathKind.PositionThreadFramesFolder or
             PathKind.CallsFolder or PathKind.CallsModuleFolder or
-            PathKind.CallsFunctionFolder => true,
+            PathKind.CallsFunctionFolder or
+            PathKind.MemoryFolder or PathKind.MemoryRangeFolder or
+            PathKind.MemoryAccessKindFolder => true,
             _ => false,
         };
     }
@@ -296,6 +337,25 @@ public sealed class TtdProvider : ProviderBase
                         yield return ($"{i}.json", false);
                 }
                 break;
+
+            case PathKind.MemoryFolder:
+            case PathKind.MemoryRangeFolder when info.MemStart == null:
+                break; // ranges specified by user
+
+            case PathKind.MemoryRangeFolder:
+                yield return ("writes", true);
+                yield return ("reads", true);
+                yield return ("rw", true);
+                break;
+
+            case PathKind.MemoryAccessKindFolder:
+                if (info.MemStart != null && info.MemEnd != null && info.AccessMode != null)
+                {
+                    var records = Store.GetMemoryAccesses(info.MemStart, info.MemEnd, info.AccessMode);
+                    for (int i = 0; i < records.Count; i++)
+                        yield return ($"{i}.json", false);
+                }
+                break;
         }
     }
 
@@ -314,6 +374,8 @@ public sealed class TtdProvider : ProviderBase
                     "navigable time positions", null);
                 WriteFolder("calls", MakePath(path, "calls"), dir,
                     "query calls to specific functions: calls\\<module>\\<function>\\", null);
+                WriteFolder("memory", MakePath(path, "memory"), dir,
+                    "memory access history: memory\\<start>_<end>\\{writes,reads,rw}\\", null);
                 break;
 
             case PathKind.CallsFunctionFolder:
@@ -321,6 +383,24 @@ public sealed class TtdProvider : ProviderBase
                 {
                     var calls = Store.GetCalls(info.Module, info.Function);
                     for (int i = 0; i < calls.Count; i++)
+                    {
+                        if (Stopping) return;
+                        WriteFile($"{i}.json", MakePath(path, $"{i}.json"), dir);
+                    }
+                }
+                break;
+
+            case PathKind.MemoryRangeFolder:
+                WriteFolder("writes", MakePath(path, "writes"), dir, "memory writes to this range", null);
+                WriteFolder("reads", MakePath(path, "reads"), dir, "memory reads from this range", null);
+                WriteFolder("rw", MakePath(path, "rw"), dir, "reads and writes combined", null);
+                break;
+
+            case PathKind.MemoryAccessKindFolder:
+                if (info.MemStart != null && info.MemEnd != null && info.AccessMode != null)
+                {
+                    var records = Store.GetMemoryAccesses(info.MemStart, info.MemEnd, info.AccessMode);
+                    for (int i = 0; i < records.Count; i++)
                     {
                         if (Stopping) return;
                         WriteFile($"{i}.json", MakePath(path, $"{i}.json"), dir);
@@ -429,15 +509,30 @@ public sealed class TtdProvider : ProviderBase
                     && info.Index is int callIdx
                 => SerializeCall(info.Module, info.Function, callIdx),
 
+            PathKind.MemoryAccessFile when info.MemStart != null && info.MemEnd != null
+                    && info.AccessMode != null && info.Index is int memIdx
+                => SerializeMemoryAccess(info.MemStart, info.MemEnd, info.AccessMode, memIdx),
+
             _ => "",
         };
+    }
+
+    private string SerializeMemoryAccess(string start, string end, string mode, int index)
+    {
+        var records = Store.GetMemoryAccesses(start, end, mode);
+        if (index < 0 || index >= records.Count) return "{}";
+        return JsonSerializer.Serialize(records[index], TraceJson.Options);
     }
 
     private string SerializeCall(string module, string function, int index)
     {
         var calls = Store.GetCalls(module, function);
         if (index < 0 || index >= calls.Count) return "{}";
-        return JsonSerializer.Serialize(calls[index], TraceJson.Options);
+        // Fetch parameters only when reading a specific call — avoids N×param queries
+        // during folder enumeration.
+        var call = calls[index];
+        call.Parameters = Store.GetCallParameters(module, function, index);
+        return JsonSerializer.Serialize(call, TraceJson.Options);
     }
 
     private string SerializeThreadInfo(ParsedPath info)
