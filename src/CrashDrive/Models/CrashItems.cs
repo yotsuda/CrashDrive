@@ -34,6 +34,10 @@ public class EventItem
     public int? Line { get; set; }
     public int? Depth { get; set; }
     public string? Summary { get; set; }   // one-line description
+    /// <summary>Source file path from the original trace event. Useful for
+    /// editor jumps: VS Code via `code --goto $SourceFile:$Line`, or for
+    /// AI tools to Read the file directly.</summary>
+    public string? SourceFile { get; set; }
     public string Path { get; set; } = "";
     public string Directory { get; set; } = "";
 
@@ -47,6 +51,7 @@ public class EventItem
             Line = ev.Line,
             Depth = ev.Depth,
             Summary = SummaryFor(ev),
+            SourceFile = ev.File,
             Path = path,
             Directory = directory,
         };
@@ -81,6 +86,7 @@ public class ExceptionItem
     public string Message { get; set; } = "";
     public string? Function { get; set; }
     public int? Line { get; set; }
+    public string? SourceFile { get; set; }
     public string Path { get; set; } = "";
     public string Directory { get; set; } = "";
 }

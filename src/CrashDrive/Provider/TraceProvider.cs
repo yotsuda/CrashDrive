@@ -323,6 +323,7 @@ public sealed class TraceProvider : ProviderBase
                         Message = rec.Event.Message ?? "",
                         Function = rec.Event.Function,
                         Line = rec.Event.Line,
+                        SourceFile = rec.Event.File,
                         Path = EnsureDrivePrefix(xPath),
                         Directory = directory,
                     };
@@ -430,6 +431,7 @@ public sealed class TraceProvider : ProviderBase
             Message = rec.Event.Message ?? "",
             Function = rec.Event.Function,
             Line = rec.Event.Line,
+            SourceFile = rec.Event.File,
             Path = EnsureDrivePrefix(itemPath),
             Directory = directory,
         }, itemPath, isContainer: true);
