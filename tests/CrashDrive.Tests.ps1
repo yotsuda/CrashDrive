@@ -229,6 +229,29 @@ Describe 'TTD provider' -Tag 'Ttd' -Skip:(-not $HasTtd) {
         { New-TtdBookmark -Drive smoke_ttd -Name ''         -Position start -ErrorAction Stop } |
             Should -Throw
     }
+
+    It 'range\<s>_to_<e>\ filters events and memory to a time window' {
+        New-CrashDrive smoke_ttd $TtdPath
+
+        # Full lifetime range must always be available
+        $range = (Get-ChildItem smoke_ttd:\range).Name
+        $range | Should -Contain 'start_to_end'
+
+        # Drill into the full-lifetime events — python01.run has exactly 4
+        # significant events (ThreadCreated + 2× ModuleLoaded + ThreadTerminated)
+        $evs = Get-ChildItem smoke_ttd:\range\start_to_end\events
+        $evs.Count | Should -BeGreaterThan 0
+
+        # A narrower window must strictly subset the full one
+        $narrow = Get-ChildItem 'smoke_ttd:\range\14_0_to_1C7F_0\events'
+        $narrow.Count | Should -BeLessOrEqual $evs.Count
+
+        # Reversed window → Invalid
+        Test-Path smoke_ttd:\range\end_to_start | Should -BeFalse
+
+        # Alias without backing data → Invalid (python01.run has no exceptions)
+        Test-Path 'smoke_ttd:\range\start_to_first-exception' | Should -BeFalse
+    }
 }
 
 Describe 'Capture round-trip (Python)' -Tag 'Capture' -Skip:(-not $HasPy) {

@@ -291,6 +291,83 @@ public sealed class TtdStore : IStore
         return best;
     }
 
+    // ─── Time-range queries ───────────────────────────────────────────
+    //
+    // ttd:\range\<s>_to_<e>\… exposes the same memory / events shapes as
+    // the unbounded views, filtered to a time window. We filter client-side
+    // after pulling a generous PickMaxRecords window — TTD.Memory does
+    // accept bracketed time bounds in dx, but constructing Position
+    // objects via TTD.Utility adds surface area for a ≤10× win, so the
+    // simpler path is preferred.
+
+    /// <summary>Memory accesses for an address range inside a time window.
+    /// Indices on the returned list are 0..N-1 (local to the window),
+    /// matching how the provider renders &lt;n&gt;.json children.</summary>
+    public IReadOnlyList<TtdMemoryAccess> GetMemoryAccessesInRange(
+        string startAddrHex, string endAddrHex, string mode,
+        string timeStart, string timeEnd, int maxRecords = 200)
+    {
+        var all = GetMemoryAccesses(startAddrHex, endAddrHex, mode, PickMaxRecords);
+        var cmp = PositionComparer.Instance;
+        var filtered = new List<TtdMemoryAccess>();
+        foreach (var r in all)
+        {
+            if (cmp.Compare(r.TimeStart, timeStart) < 0) continue;
+            if (cmp.Compare(r.TimeStart, timeEnd) > 0) break;
+            filtered.Add(new TtdMemoryAccess
+            {
+                Index = filtered.Count,
+                ThreadId = r.ThreadId, TimeStart = r.TimeStart,
+                AccessType = r.AccessType, Address = r.Address, Size = r.Size,
+                Value = r.Value, OverwrittenValue = r.OverwrittenValue, IP = r.IP,
+            });
+            if (filtered.Count >= maxRecords) break;
+        }
+        return filtered;
+    }
+
+    public TtdMemoryAccess? GetFirstWriteInRange(
+        string startAddrHex, string endAddrHex,
+        string timeStart, string timeEnd)
+    {
+        var recs = GetMemoryAccessesInRange(startAddrHex, endAddrHex, "w",
+            timeStart, timeEnd, maxRecords: 1);
+        return recs.Count > 0 ? recs[0] : null;
+    }
+
+    /// <summary>Timeline events whose position falls inside the window.
+    /// Backed by EventsByPosition (which is already sorted) so this is
+    /// a pure in-memory range scan. Returns with 0-based indices.</summary>
+    public IReadOnlyList<TtdEventWithIndex> GetEventsInRange(string timeStart, string timeEnd)
+    {
+        var cmp = PositionComparer.Instance;
+        var result = new List<TtdEventWithIndex>();
+        int localIdx = 0;
+        foreach (var e in EventsByPosition)
+        {
+            if (string.IsNullOrEmpty(e.Event.Position)) continue;
+            if (cmp.Compare(e.Event.Position, timeStart) < 0) continue;
+            if (cmp.Compare(e.Event.Position, timeEnd) > 0) break;
+            result.Add(new TtdEventWithIndex(localIdx++, e.Event));
+        }
+        return result;
+    }
+
+    public IReadOnlyList<TtdEventWithIndex> GetExceptionsInRange(string timeStart, string timeEnd)
+    {
+        var cmp = PositionComparer.Instance;
+        var result = new List<TtdEventWithIndex>();
+        int localIdx = 0;
+        foreach (var e in ExceptionEvents)
+        {
+            if (string.IsNullOrEmpty(e.Event.Position)) continue;
+            if (cmp.Compare(e.Event.Position, timeStart) < 0) continue;
+            if (cmp.Compare(e.Event.Position, timeEnd) > 0) break;
+            result.Add(new TtdEventWithIndex(localIdx++, e.Event));
+        }
+        return result;
+    }
+
     /// <summary>
     /// Parse "dx -r2 expr.Select(...)" output where each element is a block of
     /// <c>    [0xN]</c> followed by indented <c>        Field : Value</c> lines.

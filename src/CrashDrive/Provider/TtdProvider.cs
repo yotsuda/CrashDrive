@@ -90,6 +90,18 @@ public sealed class TtdProvider : ProviderBase
 
         BookmarksFolder,                            // bookmarks/
 
+        RangeRoot,                                  // range/
+        RangeFolder,                                // range/<s>_to_<e>/
+        RangeEventsFolder,                          // range/<s>_to_<e>/events/
+        RangeEventFile,                             // range/<s>_to_<e>/events/<n>.json
+        RangeExceptionsFolder,                      // range/<s>_to_<e>/exceptions/
+        RangeExceptionFile,                         // range/<s>_to_<e>/exceptions/<n>.json
+        RangeMemoryFolder,                          // range/<s>_to_<e>/memory/
+        RangeMemoryRangeFolder,                     // range/<s>_to_<e>/memory/<as>_<ae>/
+        RangeMemoryAccessKindFolder,                // range/<s>_to_<e>/memory/<as>_<ae>/{w,r,rw}/
+        RangeMemoryAccessFile,                      // range/<s>_to_<e>/memory/<as>_<ae>/{w,r,rw}/<n>.json
+        RangeMemoryFirstWriteFile,                  // range/<s>_to_<e>/memory/<as>_<ae>/first-write.json
+
         MemoryFolder,                               // memory/
         MemoryRangeFolder,                          // memory/<start>_<end>/
         MemoryAccessKindFolder,                     // memory/<range>/{writes,reads,rw}/
@@ -114,7 +126,14 @@ public sealed class TtdProvider : ProviderBase
         string? MemEnd = null,
         string? AccessMode = null,
         int? RangeStart = null,
-        int? RangeEnd = null);
+        int? RangeEnd = null,
+        string? TimeStart = null,
+        string? TimeEnd = null);
+
+    /// <summary>Separator in ttd:\range\&lt;start&gt;_to_&lt;end&gt;\ paths.
+    /// Chosen over "-" because aliases like "first-exception" contain dashes,
+    /// and over "_" because path-form positions ("1CBF_8C0") contain one.</summary>
+    private const string RangeSep = "_to_";
 
     /// <summary>Pagination threshold for <c>calls\&lt;mod&gt;\&lt;fn&gt;\</c>. Hit lists with
     /// more entries are exposed as <c>&lt;start&gt;-&lt;end&gt;\</c> subfolders instead of
@@ -149,6 +168,7 @@ public sealed class TtdProvider : ProviderBase
                 "positions" => new(PathKind.PositionsFolder, segs),
                 "calls" => new(PathKind.CallsFolder, segs),
                 "bookmarks" => new(PathKind.BookmarksFolder, segs),
+                "range" => new(PathKind.RangeRoot, segs),
                 "memory" => new(PathKind.MemoryFolder, segs),
                 _ => new(PathKind.Invalid, segs),
             };
@@ -272,6 +292,89 @@ public sealed class TtdProvider : ProviderBase
             return resolved with { Segments = segs };
         }
 
+        if (head == "range")
+        {
+            // range/<s>_to_<e>/… — a time window applied to the same event /
+            // exception / memory shapes that exist standalone. Both bounds are
+            // resolved at Parse time so the entire subtree short-circuits to
+            // Invalid when an alias (e.g. first-exception) has no data.
+            if (segs.Length < 2) return new(PathKind.Invalid, segs);
+
+            var sep = segs[1].IndexOf(RangeSep, StringComparison.Ordinal);
+            if (sep <= 0 || sep + RangeSep.Length >= segs[1].Length)
+                return new(PathKind.Invalid, segs);
+            var startName = segs[1][..sep];
+            var endName   = segs[1][(sep + RangeSep.Length)..];
+
+            // Validate the two halves as position names — either symbolic
+            // (start/end/first-exception/...) or encoded "major_minor" hex.
+            if (!Ttd.TtdPosition.IsValid(startName)) return new(PathKind.Invalid, segs);
+            if (!Ttd.TtdPosition.IsValid(endName))   return new(PathKind.Invalid, segs);
+
+            var ns = ResolvePositionOrNull(startName);
+            var ne = ResolvePositionOrNull(endName);
+            if (ns == null || ne == null) return new(PathKind.Invalid, segs);
+            // Disallow reversed windows; PositionComparer sorts deterministically.
+            if (Ttd.PositionComparer.Instance.Compare(ns, ne) > 0)
+                return new(PathKind.Invalid, segs);
+
+            var rp = new ParsedPath(PathKind.RangeFolder, segs,
+                TimeStart: ns, TimeEnd: ne);
+
+            if (segs.Length == 2) return rp;
+
+            var sub = segs[2].ToLowerInvariant();
+            if (segs.Length == 3)
+                return sub switch
+                {
+                    "events"     => rp with { Kind = PathKind.RangeEventsFolder },
+                    "exceptions" => rp with { Kind = PathKind.RangeExceptionsFolder },
+                    "memory"     => rp with { Kind = PathKind.RangeMemoryFolder },
+                    _ => new(PathKind.Invalid, segs),
+                };
+
+            if (segs.Length == 4
+                && segs[3].EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(segs[3][..^5], out var rIdx))
+            {
+                return sub switch
+                {
+                    "events"     => rp with { Kind = PathKind.RangeEventFile,     Index = rIdx },
+                    "exceptions" => rp with { Kind = PathKind.RangeExceptionFile, Index = rIdx },
+                    _ => new(PathKind.Invalid, segs),
+                };
+            }
+
+            // Memory branch: range/<s>_to_<e>/memory/<as>_<ae>[/{w,r,rw}[/<n>.json]]
+            if (sub == "memory" && segs.Length >= 4)
+            {
+                var memRange = segs[3];
+                var memSep = memRange.IndexOf('_');
+                if (memSep <= 0 || memSep >= memRange.Length - 1) return new(PathKind.Invalid, segs);
+                rp = rp with { MemStart = memRange[..memSep], MemEnd = memRange[(memSep + 1)..] };
+
+                if (segs.Length == 4) return rp with { Kind = PathKind.RangeMemoryRangeFolder };
+                if (segs.Length == 5)
+                {
+                    if (segs[4] is "writes" or "reads" or "rw")
+                        return rp with { Kind = PathKind.RangeMemoryAccessKindFolder,
+                                         AccessMode = ModeFromFolder(segs[4]) };
+                    if (segs[4].Equals("first-write.json", StringComparison.OrdinalIgnoreCase))
+                        return rp with { Kind = PathKind.RangeMemoryFirstWriteFile };
+                }
+                if (segs.Length == 6
+                    && segs[4] is "writes" or "reads" or "rw"
+                    && segs[5].EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                    && int.TryParse(segs[5][..^5], out var rmIdx))
+                {
+                    return rp with { Kind = PathKind.RangeMemoryAccessFile,
+                                     AccessMode = ModeFromFolder(segs[4]), Index = rmIdx };
+                }
+            }
+
+            return new(PathKind.Invalid, segs);
+        }
+
         if (head == "memory")
         {
             // memory/<start>_<end>[/<mode>[/<n>.json]]
@@ -379,6 +482,23 @@ public sealed class TtdProvider : ProviderBase
                     && info.EncodedPosition != null
                 => Store.GetLastWriteBefore(info.MemStart, info.MemEnd,
                     ResolvePosition(info.EncodedPosition)) != null,
+
+            PathKind.RangeEventFile when info.TimeStart != null && info.TimeEnd != null
+                    && info.Index is int ri
+                => ri >= 0 && ri < Store.GetEventsInRange(info.TimeStart, info.TimeEnd).Count,
+            PathKind.RangeExceptionFile when info.TimeStart != null && info.TimeEnd != null
+                    && info.Index is int rxi
+                => rxi >= 0 && rxi < Store.GetExceptionsInRange(info.TimeStart, info.TimeEnd).Count,
+            PathKind.RangeMemoryAccessFile when info.TimeStart != null && info.TimeEnd != null
+                    && info.MemStart != null && info.MemEnd != null
+                    && info.AccessMode != null && info.Index is int rmi
+                => rmi >= 0 && rmi < Store.GetMemoryAccessesInRange(
+                    info.MemStart, info.MemEnd, info.AccessMode,
+                    info.TimeStart, info.TimeEnd).Count,
+            PathKind.RangeMemoryFirstWriteFile when info.TimeStart != null && info.TimeEnd != null
+                    && info.MemStart != null && info.MemEnd != null
+                => Store.GetFirstWriteInRange(info.MemStart, info.MemEnd,
+                    info.TimeStart, info.TimeEnd) != null,
             _ => true,
         };
     }
@@ -396,6 +516,10 @@ public sealed class TtdProvider : ProviderBase
             PathKind.CallsFolder or PathKind.CallsModuleFolder or
             PathKind.CallsFunctionFolder or PathKind.CallsRangeFolder or
             PathKind.BookmarksFolder or
+            PathKind.RangeRoot or PathKind.RangeFolder or
+            PathKind.RangeEventsFolder or PathKind.RangeExceptionsFolder or
+            PathKind.RangeMemoryFolder or PathKind.RangeMemoryRangeFolder or
+            PathKind.RangeMemoryAccessKindFolder or
             PathKind.MemoryFolder or PathKind.MemoryRangeFolder or
             PathKind.MemoryAccessKindFolder or
             PathKind.MemoryLastWriteBeforeFolder => true,
@@ -507,6 +631,45 @@ public sealed class TtdProvider : ProviderBase
                         ResolvePosition(info.EncodedPosition));
                     if (last != null)
                         WriteMemoryItem(last, name, path, dir);
+                }
+                break;
+
+            case PathKind.RangeEventFile when info.TimeStart != null && info.TimeEnd != null
+                    && info.Index is int rei:
+                {
+                    var events = Store.GetEventsInRange(info.TimeStart, info.TimeEnd);
+                    if (rei >= 0 && rei < events.Count)
+                        WriteEventItem(events[rei], name, path, dir);
+                }
+                break;
+
+            case PathKind.RangeExceptionFile when info.TimeStart != null && info.TimeEnd != null
+                    && info.Index is int rexi:
+                {
+                    var xs = Store.GetExceptionsInRange(info.TimeStart, info.TimeEnd);
+                    if (rexi >= 0 && rexi < xs.Count)
+                        WriteEventItem(xs[rexi], name, path, dir);
+                }
+                break;
+
+            case PathKind.RangeMemoryAccessFile when info.TimeStart != null && info.TimeEnd != null
+                    && info.MemStart != null && info.MemEnd != null
+                    && info.AccessMode != null && info.Index is int rmai:
+                {
+                    var rmRecs = Store.GetMemoryAccessesInRange(info.MemStart, info.MemEnd,
+                        info.AccessMode, info.TimeStart, info.TimeEnd);
+                    if (rmai >= 0 && rmai < rmRecs.Count)
+                        WriteMemoryItem(rmRecs[rmai], name, path, dir);
+                }
+                break;
+
+            case PathKind.RangeMemoryFirstWriteFile when info.TimeStart != null && info.TimeEnd != null
+                    && info.MemStart != null && info.MemEnd != null:
+                {
+                    var first = Store.GetFirstWriteInRange(info.MemStart, info.MemEnd,
+                        info.TimeStart, info.TimeEnd);
+                    if (first != null)
+                        WriteMemoryItem(first, name, path, dir);
                 }
                 break;
 
@@ -653,6 +816,62 @@ public sealed class TtdProvider : ProviderBase
                 yield return ("ttd-events", true);
                 yield return ("positions", true);
                 yield return ("bookmarks", true);
+                yield return ("range", true);
+                break;
+
+            case PathKind.RangeRoot:
+                // Can't enumerate every possible range — user/AI constructs
+                // them by name. Surface a small set of useful pre-made windows
+                // when the backing data is present: lifetime (start→end),
+                // first-to-last exception if ≥2 exist.
+                yield return ($"start{RangeSep}end", true);
+                if (Store.ExceptionEvents.Count >= 2)
+                    yield return ($"first-exception{RangeSep}last-exception", true);
+                if (Store.ExceptionEvents.Count >= 1)
+                    yield return ($"start{RangeSep}first-exception", true);
+                break;
+
+            case PathKind.RangeFolder:
+                yield return ("events", true);
+                yield return ("exceptions", true);
+                yield return ("memory", true);
+                break;
+
+            case PathKind.RangeEventsFolder when info.TimeStart != null && info.TimeEnd != null:
+                {
+                    var events = Store.GetEventsInRange(info.TimeStart, info.TimeEnd);
+                    for (int i = 0; i < events.Count; i++)
+                        yield return ($"{i}.json", false);
+                }
+                break;
+
+            case PathKind.RangeExceptionsFolder when info.TimeStart != null && info.TimeEnd != null:
+                {
+                    var xs = Store.GetExceptionsInRange(info.TimeStart, info.TimeEnd);
+                    for (int i = 0; i < xs.Count; i++)
+                        yield return ($"{i}.json", false);
+                }
+                break;
+
+            case PathKind.RangeMemoryFolder:
+                // Memory ranges aren't enumerable — user specifies them.
+                break;
+
+            case PathKind.RangeMemoryRangeFolder:
+                yield return ("writes", true);
+                yield return ("reads", true);
+                yield return ("rw", true);
+                yield return ("first-write.json", false);
+                break;
+
+            case PathKind.RangeMemoryAccessKindFolder when info.TimeStart != null && info.TimeEnd != null
+                    && info.MemStart != null && info.MemEnd != null && info.AccessMode != null:
+                {
+                    var recs = Store.GetMemoryAccessesInRange(info.MemStart, info.MemEnd,
+                        info.AccessMode, info.TimeStart, info.TimeEnd);
+                    for (int i = 0; i < recs.Count; i++)
+                        yield return ($"{i}.json", false);
+                }
                 break;
 
             case PathKind.BookmarksFolder:
@@ -825,6 +1044,8 @@ public sealed class TtdProvider : ProviderBase
                 WriteFolder("bookmarks", MakePath(path, "bookmarks"), dir,
                     "named positions: New-TtdBookmark -Name <n> -Position <pos>",
                     PSDriveInfo is TtdDriveInfo bkDrv ? bkDrv.Bookmarks.Count : (int?)null);
+                WriteFolder("range", MakePath(path, "range"), dir,
+                    "time-window queries: range\\<start>" + RangeSep + "<end>\\{events,exceptions,memory}\\", null);
                 WriteFolder("memory", MakePath(path, "memory"), dir,
                     "memory access history: memory\\<start>_<end>\\{writes,reads,rw}\\", null);
                 break;
@@ -922,6 +1143,90 @@ public sealed class TtdProvider : ProviderBase
                 WriteFile("first-write.json", MakePath(path, "first-write.json"), dir);
                 WriteFolder("last-write-before", MakePath(path, "last-write-before"), dir,
                     "pick the last write before <position>.json (position is path-encoded, e.g. 1CBF_8C1)", null);
+                break;
+
+            case PathKind.RangeRoot:
+                WriteFolder($"start{RangeSep}end", MakePath(path, $"start{RangeSep}end"), dir,
+                    $"lifetime ({Store.Summary.LifetimeStart} → {Store.Summary.LifetimeEnd})", null);
+                if (Store.ExceptionEvents.Count >= 2)
+                {
+                    var n = $"first-exception{RangeSep}last-exception";
+                    WriteFolder(n, MakePath(path, n), dir,
+                        "time window across all recorded exceptions", null);
+                }
+                if (Store.ExceptionEvents.Count >= 1)
+                {
+                    var n = $"start{RangeSep}first-exception";
+                    WriteFolder(n, MakePath(path, n), dir,
+                        "from lifetime start to first exception", null);
+                }
+                break;
+
+            case PathKind.RangeFolder when info.TimeStart != null && info.TimeEnd != null:
+                {
+                    var evCount = Store.GetEventsInRange(info.TimeStart, info.TimeEnd).Count;
+                    var exCount = Store.GetExceptionsInRange(info.TimeStart, info.TimeEnd).Count;
+                    WriteFolder("events", MakePath(path, "events"), dir,
+                        $"timeline events in [{info.TimeStart}, {info.TimeEnd}]", evCount);
+                    WriteFolder("exceptions", MakePath(path, "exceptions"), dir,
+                        $"exceptions in [{info.TimeStart}, {info.TimeEnd}]", exCount);
+                    WriteFolder("memory", MakePath(path, "memory"), dir,
+                        "memory\\<start>_<end>\\{writes,reads,rw}\\ — filtered to this window", null);
+                }
+                break;
+
+            case PathKind.RangeEventsFolder when info.TimeStart != null && info.TimeEnd != null:
+                {
+                    var events = Store.GetEventsInRange(info.TimeStart, info.TimeEnd);
+                    for (int i = 0; i < events.Count; i++)
+                    {
+                        if (Stopping) return;
+                        WriteEventItem(events[i], $"{i}.json", MakePath(path, $"{i}.json"), dir);
+                    }
+                }
+                break;
+
+            case PathKind.RangeExceptionsFolder when info.TimeStart != null && info.TimeEnd != null:
+                {
+                    var xs = Store.GetExceptionsInRange(info.TimeStart, info.TimeEnd);
+                    for (int i = 0; i < xs.Count; i++)
+                    {
+                        if (Stopping) return;
+                        WriteEventItem(xs[i], $"{i}.json", MakePath(path, $"{i}.json"), dir);
+                    }
+                }
+                break;
+
+            case PathKind.RangeMemoryRangeFolder:
+                WriteFolder("writes", MakePath(path, "writes"), dir, "memory writes in window", null);
+                WriteFolder("reads",  MakePath(path, "reads"),  dir, "memory reads in window",  null);
+                WriteFolder("rw",     MakePath(path, "rw"),     dir, "reads and writes combined, in window", null);
+                WriteFile("first-write.json", MakePath(path, "first-write.json"), dir);
+                break;
+
+            case PathKind.RangeMemoryAccessKindFolder when info.TimeStart != null && info.TimeEnd != null
+                    && info.MemStart != null && info.MemEnd != null && info.AccessMode != null:
+                {
+                    var records = Store.GetMemoryAccessesInRange(info.MemStart, info.MemEnd,
+                        info.AccessMode, info.TimeStart, info.TimeEnd);
+                    for (int i = 0; i < records.Count; i++)
+                    {
+                        if (Stopping) return;
+                        var r = records[i];
+                        var rPath = MakePath(path, $"{i}.json");
+                        WriteItemObject(new Models.TtdMemoryItem
+                        {
+                            Index = i,
+                            Name = $"{i}.json",
+                            Position = r.TimeStart,
+                            AccessType = r.AccessType,
+                            Address = r.Address,
+                            Value = r.Value,
+                            Path = EnsureDrivePrefix(rPath),
+                            Directory = dir,
+                        }, rPath, isContainer: false);
+                    }
+                }
                 break;
 
             case PathKind.MemoryAccessKindFolder:
@@ -1127,6 +1432,24 @@ public sealed class TtdProvider : ProviderBase
                         ResolvePosition(info.EncodedPosition)) ?? (object)new { },
                     TraceJson.Options),
 
+            PathKind.RangeEventFile when info.TimeStart != null && info.TimeEnd != null
+                    && info.Index is int refi
+                => SerializeRangeEvent(Store.GetEventsInRange(info.TimeStart, info.TimeEnd), refi),
+            PathKind.RangeExceptionFile when info.TimeStart != null && info.TimeEnd != null
+                    && info.Index is int rxfi
+                => SerializeRangeEvent(Store.GetExceptionsInRange(info.TimeStart, info.TimeEnd), rxfi),
+            PathKind.RangeMemoryAccessFile when info.TimeStart != null && info.TimeEnd != null
+                    && info.MemStart != null && info.MemEnd != null
+                    && info.AccessMode != null && info.Index is int rmfi
+                => SerializeRangeMemoryAccess(info.MemStart, info.MemEnd, info.AccessMode,
+                    info.TimeStart, info.TimeEnd, rmfi),
+            PathKind.RangeMemoryFirstWriteFile when info.TimeStart != null && info.TimeEnd != null
+                    && info.MemStart != null && info.MemEnd != null
+                => JsonSerializer.Serialize(
+                    Store.GetFirstWriteInRange(info.MemStart, info.MemEnd,
+                        info.TimeStart, info.TimeEnd) ?? (object)new { },
+                    TraceJson.Options),
+
             _ => "",
         };
     }
@@ -1134,6 +1457,20 @@ public sealed class TtdProvider : ProviderBase
     private string SerializeMemoryAccess(string start, string end, string mode, int index)
     {
         var records = Store.GetMemoryAccesses(start, end, mode);
+        if (index < 0 || index >= records.Count) return "{}";
+        return JsonSerializer.Serialize(records[index], TraceJson.Options);
+    }
+
+    private static string SerializeRangeEvent(IReadOnlyList<Ttd.TtdEventWithIndex> list, int index)
+    {
+        if (index < 0 || index >= list.Count) return "{}";
+        return JsonSerializer.Serialize(list[index].Event, TraceJson.Options);
+    }
+
+    private string SerializeRangeMemoryAccess(string start, string end, string mode,
+        string timeStart, string timeEnd, int index)
+    {
+        var records = Store.GetMemoryAccessesInRange(start, end, mode, timeStart, timeEnd);
         if (index < 0 || index >= records.Count) return "{}";
         return JsonSerializer.Serialize(records[index], TraceJson.Options);
     }
