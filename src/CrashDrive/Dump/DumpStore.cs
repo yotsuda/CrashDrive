@@ -79,19 +79,39 @@ public sealed class DumpStore : IStore
     {
         get
         {
-            // Lazy-init here since we want it depending on _runtime.Value
-            if (_heapTypesCache != null) return _heapTypesCache;
-            lock (_heapLock)
-            {
-                if (_heapTypesCache != null) return _heapTypesCache;
-                _heapTypesCache = BuildHeapTypes();
-                return _heapTypesCache;
-            }
+            EnsureHeapBuilt();
+            return _heapTypesCache ?? (IReadOnlyList<DumpTypeStats>)Array.Empty<DumpTypeStats>();
+        }
+    }
+
+    /// <summary>Per-generation breakdown computed in the same heap walk as
+    /// <see cref="HeapTypes"/>. Keys are "gen0", "gen1", "gen2", "loh",
+    /// "pinned", "frozen". Absent keys mean the walk found zero objects in
+    /// that generation. Values sorted by total bytes desc.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<DumpTypeStats>> HeapTypesByGeneration
+    {
+        get
+        {
+            EnsureHeapBuilt();
+            return _heapByGenCache
+                ?? (IReadOnlyDictionary<string, IReadOnlyList<DumpTypeStats>>)
+                   new Dictionary<string, IReadOnlyList<DumpTypeStats>>();
         }
     }
 
     private readonly object _heapLock = new();
     private IReadOnlyList<DumpTypeStats>? _heapTypesCache;
+    private IReadOnlyDictionary<string, IReadOnlyList<DumpTypeStats>>? _heapByGenCache;
+
+    private void EnsureHeapBuilt()
+    {
+        if (_heapTypesCache != null) return;
+        lock (_heapLock)
+        {
+            if (_heapTypesCache != null) return;
+            BuildHeap(out _heapTypesCache, out _heapByGenCache);
+        }
+    }
 
     // ─── !analyze -v (via dbgeng) ────────────────────────────────────
     //
@@ -375,39 +395,87 @@ public sealed class DumpStore : IStore
         }
     }
 
-    private IReadOnlyList<DumpTypeStats> BuildHeapTypes()
+    private void BuildHeap(
+        out IReadOnlyList<DumpTypeStats> overall,
+        out IReadOnlyDictionary<string, IReadOnlyList<DumpTypeStats>> byGen)
     {
-        var runtime = _runtime.Value;
-        if (runtime == null) return [];
+        overall = Array.Empty<DumpTypeStats>();
+        byGen = new Dictionary<string, IReadOnlyList<DumpTypeStats>>();
 
-        var agg = new Dictionary<string, (int Count, long Bytes)>(StringComparer.Ordinal);
+        var runtime = _runtime.Value;
+        if (runtime == null) return;
+
+        var all = new Dictionary<string, (int Count, long Bytes)>(StringComparer.Ordinal);
+        // Per-generation buckets keyed by GenerationKey(obj.Generation).
+        var perGen = new Dictionary<string, Dictionary<string, (int Count, long Bytes)>>(StringComparer.Ordinal);
+
         try
         {
             foreach (var obj in runtime.Heap.EnumerateObjects())
             {
                 var name = obj.Type?.Name ?? "<unknown>";
                 var size = (long)obj.Size;
-                if (agg.TryGetValue(name, out var v))
-                    agg[name] = (v.Count + 1, v.Bytes + size);
+
+                if (all.TryGetValue(name, out var v))
+                    all[name] = (v.Count + 1, v.Bytes + size);
                 else
-                    agg[name] = (1, size);
+                    all[name] = (1, size);
+
+                // Generation lookup: find the GC segment containing the
+                // object, then ask it for the object's generation. On a
+                // truncated / partial dump segment lookup can return null or
+                // throw — fall through to "unknown" silently.
+                string genKey;
+                try
+                {
+                    var seg = runtime.Heap.GetSegmentByAddress(obj.Address);
+                    genKey = GenerationKey(seg?.GetGeneration(obj.Address));
+                }
+                catch { genKey = "unknown"; }
+
+                if (!perGen.TryGetValue(genKey, out var bucket))
+                {
+                    bucket = new Dictionary<string, (int Count, long Bytes)>(StringComparer.Ordinal);
+                    perGen[genKey] = bucket;
+                }
+                if (bucket.TryGetValue(name, out var bv))
+                    bucket[name] = (bv.Count + 1, bv.Bytes + size);
+                else
+                    bucket[name] = (1, size);
             }
         }
         catch
         {
-            // Heap walk can fail on partial dumps — return what we got.
+            // Heap walk can fail partway on truncated dumps — surface what
+            // we got rather than nothing.
         }
 
-        return agg
-            .Select(kv => new DumpTypeStats
-            {
-                TypeName = kv.Key,
-                InstanceCount = kv.Value.Count,
-                TotalBytes = kv.Value.Bytes,
-            })
-            .OrderByDescending(s => s.TotalBytes)
-            .ToList();
+        overall = SortDesc(all);
+        var result = new Dictionary<string, IReadOnlyList<DumpTypeStats>>(StringComparer.Ordinal);
+        foreach (var (k, v) in perGen) result[k] = SortDesc(v);
+        byGen = result;
+
+        static IReadOnlyList<DumpTypeStats> SortDesc(Dictionary<string, (int Count, long Bytes)> d) =>
+            d.Select(kv => new DumpTypeStats
+             {
+                 TypeName = kv.Key,
+                 InstanceCount = kv.Value.Count,
+                 TotalBytes = kv.Value.Bytes,
+             })
+             .OrderByDescending(s => s.TotalBytes)
+             .ToList();
     }
+
+    private static string GenerationKey(Microsoft.Diagnostics.Runtime.Generation? gen) => gen switch
+    {
+        Microsoft.Diagnostics.Runtime.Generation.Generation0 => "gen0",
+        Microsoft.Diagnostics.Runtime.Generation.Generation1 => "gen1",
+        Microsoft.Diagnostics.Runtime.Generation.Generation2 => "gen2",
+        Microsoft.Diagnostics.Runtime.Generation.Large       => "loh",
+        Microsoft.Diagnostics.Runtime.Generation.Pinned      => "pinned",
+        Microsoft.Diagnostics.Runtime.Generation.Frozen      => "frozen",
+        _ => "unknown",
+    };
 
     private ClrRuntime? CreateRuntime()
     {

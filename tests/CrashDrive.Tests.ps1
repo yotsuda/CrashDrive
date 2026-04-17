@@ -12,6 +12,7 @@ BeforeDiscovery {
     $script:RepoRoot  = Split-Path -Parent $PSScriptRoot
     $script:Scratch   = Join-Path $script:RepoRoot 'scratch'
     $script:DumpPath  = Join-Path $script:Scratch 'self.dmp'
+    $script:FullDump  = Join-Path $script:Scratch 'self-full.dmp'
     $script:TracePath = Join-Path $script:Scratch 'cart.jsonl'
     $script:TtdPath   = Join-Path $script:Scratch 'ttd\python01.run'
     $script:PyTarget  = Join-Path $script:Scratch 'sample_target.py'
@@ -79,6 +80,41 @@ Describe 'Dump provider' -Tag 'Dump' -Skip:(-not $HasDump) {
         $triage | Should -Match '## Threads with active managed exceptions'
         $triage | Should -Match '## Thread summary'
         $triage | Should -Match '## Where to look next'
+    }
+
+    It 'exposes modules\by-kind\ filtering native vs managed' {
+        New-CrashDrive smoke_dump $DumpPath
+        $top = (Get-ChildItem smoke_dump:\modules).Name
+        $top | Should -Contain 'by-kind'
+
+        $kinds = (Get-ChildItem smoke_dump:\modules\by-kind).Name
+        # At least one of native / managed must be present (the self dump
+        # has both CrashDrive.dll — managed — and ntdll etc. — native).
+        ($kinds -contains 'native' -or $kinds -contains 'managed') | Should -BeTrue
+
+        if ($kinds -contains 'native') {
+            $nativeMods = Get-ChildItem smoke_dump:\modules\by-kind\native
+            $nativeMods.Count | Should -BeGreaterThan 0
+            $nativeMods | ForEach-Object { $_.IsManaged | Should -BeFalse }
+        }
+    }
+
+    It 'exposes heap\by-generation\ for CLR dumps' -Skip:(-not (Test-Path $FullDump)) {
+        # Generation info requires CLR data; self.dmp (Normal) may have
+        # partial heap, so use self-full.dmp when available.
+        New-CrashDrive smoke_dump $FullDump
+        $heap = (Get-ChildItem smoke_dump:\heap).Name
+        $heap | Should -Contain 'by-generation'
+
+        $gens = (Get-ChildItem smoke_dump:\heap\by-generation).Name
+        # gen2 is practically always populated on a live process snapshot
+        $gens | Should -Contain 'gen2'
+
+        $gen2Types = Get-ChildItem smoke_dump:\heap\by-generation\gen2
+        $gen2Types.Count | Should -BeGreaterThan 0
+        $first = $gen2Types | Sort-Object TotalBytes -Descending | Select-Object -First 1
+        $first.InstanceCount | Should -BeGreaterThan 0
+        $first.TotalBytes    | Should -BeGreaterThan 0
     }
 
     It 'auto-classifies threads by state and exception' {

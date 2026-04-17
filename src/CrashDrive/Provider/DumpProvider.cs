@@ -70,7 +70,12 @@ public sealed class DumpProvider : ProviderBase
         ThreadsByStateFolder,                       // threads/by-state/
         ThreadsByStateCategoryFolder,               // threads/by-state/<state>/
         ModulesFolder, ModuleFile,
+        ModulesByKindFolder,                        // modules/by-kind/
+        ModulesByKindCategoryFolder,                // modules/by-kind/<kind>/ where kind ∈ {native,managed}
         HeapFolder, HeapTypesFolder, HeapTypeFile,
+        HeapByGenerationFolder,                     // heap/by-generation/
+        HeapByGenerationTypesFolder,                // heap/by-generation/<gen>/
+        HeapByGenerationTypeFile,                   // heap/by-generation/<gen>/<type>.json
         Invalid,
     }
 
@@ -81,12 +86,23 @@ public sealed class DumpProvider : ProviderBase
         int? FrameIndex = null,
         string? ModuleFile = null,
         string? TypeName = null,
-        string? State = null);
+        string? State = null,
+        string? ModuleKind = null,
+        string? Generation = null);
 
     // Thread classification states exposed under threads\by-state\. The set is
     // deliberately narrow — things that can be computed from existing
     // DumpThreadInfo flags without walking frames.
     private static readonly string[] ThreadStates = { "finalizer", "gc", "dead" };
+
+    // Module kinds exposed under modules\by-kind\.
+    private static readonly string[] ModuleKinds = { "native", "managed" };
+
+    // GC generation keys matching DumpStore.HeapTypesByGeneration. The visible
+    // order under heap\by-generation\ follows the canonical lifecycle order:
+    // young → old → large/pinned/frozen/unknown.
+    private static readonly string[] GenerationOrder =
+        { "gen0", "gen1", "gen2", "loh", "pinned", "frozen", "unknown" };
 
     private static bool MatchesState(DumpThreadInfo t, string state) => state switch
     {
@@ -172,9 +188,34 @@ public sealed class DumpProvider : ProviderBase
                 && int.TryParse(segs[3][..^5], out var fi))
                 return new(PathKind.FrameFile, segs, ThreadId: tid, FrameIndex: fi);
         }
-        if (head == "modules" && segs.Length == 2
-            && segs[1].EndsWith(".json", StringComparison.OrdinalIgnoreCase))
-            return new(PathKind.ModuleFile, segs, ModuleFile: segs[1][..^5]);
+        if (head == "modules")
+        {
+            // modules\by-kind\<kind>\<file>.json — filter on IsManaged, translate
+            // the leaf to the canonical modules\<file>.json lookup.
+            if (segs.Length >= 2 && segs[1].Equals("by-kind", StringComparison.OrdinalIgnoreCase))
+            {
+                if (segs.Length == 2) return new(PathKind.ModulesByKindFolder, segs);
+                var kind = segs[2].ToLowerInvariant();
+                if (!ModuleKinds.Contains(kind)) return new(PathKind.Invalid, segs);
+                if (segs.Length == 3)
+                    return new(PathKind.ModulesByKindCategoryFolder, segs, ModuleKind: kind);
+                if (segs.Length == 4
+                    && segs[3].EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                {
+                    var file = segs[3][..^5];
+                    var wantManaged = kind == "managed";
+                    if (Store.Modules.Any(m => Sanitize(m.FileName)
+                            .Equals(file, StringComparison.OrdinalIgnoreCase)
+                            && m.IsManaged == wantManaged))
+                        return new(PathKind.ModuleFile, segs, ModuleFile: file);
+                    return new(PathKind.Invalid, segs);
+                }
+                return new(PathKind.Invalid, segs);
+            }
+            if (segs.Length == 2
+                && segs[1].EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                return new(PathKind.ModuleFile, segs, ModuleFile: segs[1][..^5]);
+        }
 
         if (head == "heap")
         {
@@ -183,6 +224,21 @@ public sealed class DumpProvider : ProviderBase
             if (segs.Length == 3 && segs[1] == "types"
                 && segs[2].EndsWith(".json", StringComparison.OrdinalIgnoreCase))
                 return new(PathKind.HeapTypeFile, segs, TypeName: segs[2][..^5]);
+
+            // heap\by-generation\<gen>\<type>.json — type stats filtered to one
+            // GC generation. Leaf item carries the same shape as heap\types\.
+            if (segs.Length >= 2 && segs[1].Equals("by-generation", StringComparison.OrdinalIgnoreCase))
+            {
+                if (segs.Length == 2) return new(PathKind.HeapByGenerationFolder, segs);
+                var gen = segs[2].ToLowerInvariant();
+                if (!GenerationOrder.Contains(gen)) return new(PathKind.Invalid, segs);
+                if (segs.Length == 3)
+                    return new(PathKind.HeapByGenerationTypesFolder, segs, Generation: gen);
+                if (segs.Length == 4
+                    && segs[3].EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                    return new(PathKind.HeapByGenerationTypeFile, segs,
+                        Generation: gen, TypeName: segs[3][..^5]);
+            }
         }
 
         return new(PathKind.Invalid, segs);
@@ -209,6 +265,12 @@ public sealed class DumpProvider : ProviderBase
             PathKind.HeapTypeFile
                 => info.TypeName != null && Store.HeapTypes.Any(t =>
                     SanitizeFull(t.TypeName).Equals(info.TypeName, StringComparison.Ordinal)),
+            PathKind.HeapByGenerationTypesFolder when info.Generation != null
+                => Store.HeapTypesByGeneration.ContainsKey(info.Generation),
+            PathKind.HeapByGenerationTypeFile when info.Generation != null && info.TypeName != null
+                => Store.HeapTypesByGeneration.TryGetValue(info.Generation, out var lst)
+                    && lst.Any(t => SanitizeFull(t.TypeName)
+                        .Equals(info.TypeName, StringComparison.Ordinal)),
             _ => true,
         };
     }
@@ -221,7 +283,9 @@ public sealed class DumpProvider : ProviderBase
             PathKind.ThreadFramesFolder or PathKind.ModulesFolder or
             PathKind.HeapFolder or PathKind.HeapTypesFolder or
             PathKind.ThreadsWithExceptionFolder or PathKind.ThreadsByStateFolder or
-            PathKind.ThreadsByStateCategoryFolder => true,
+            PathKind.ThreadsByStateCategoryFolder or
+            PathKind.ModulesByKindFolder or PathKind.ModulesByKindCategoryFolder or
+            PathKind.HeapByGenerationFolder or PathKind.HeapByGenerationTypesFolder => true,
             _ => false,
         };
     }
@@ -312,6 +376,24 @@ public sealed class DumpProvider : ProviderBase
                 }
                 break;
 
+            case PathKind.HeapByGenerationTypeFile when info.Generation != null && info.TypeName != null:
+                if (Store.HeapTypesByGeneration.TryGetValue(info.Generation, out var gtypes))
+                {
+                    var gstats = gtypes.FirstOrDefault(s =>
+                        SanitizeFull(s.TypeName).Equals(info.TypeName, StringComparison.Ordinal));
+                    if (gstats != null)
+                        WriteItemObject(new Models.HeapTypeItem
+                        {
+                            Name = name,
+                            TypeName = gstats.TypeName,
+                            InstanceCount = gstats.InstanceCount,
+                            TotalBytes = gstats.TotalBytes,
+                            Path = EnsureDrivePrefix(path),
+                            Directory = dir,
+                        }, path, isContainer: false);
+                }
+                break;
+
             case PathKind.Summary or PathKind.Analyze or PathKind.Triage
                 or PathKind.ThreadInfo or PathKind.ThreadStack
                 or PathKind.ThreadException or PathKind.ThreadRegisters:
@@ -378,6 +460,8 @@ public sealed class DumpProvider : ProviderBase
                 break;
             case PathKind.HeapFolder:
                 yield return ("types", true);
+                if (Store.HeapTypesByGeneration.Count > 0)
+                    yield return ("by-generation", true);
                 break;
             case PathKind.HeapTypesFolder:
                 foreach (var t in Store.HeapTypes)
@@ -428,8 +512,43 @@ public sealed class DumpProvider : ProviderBase
                 }
                 break;
             case PathKind.ModulesFolder:
+                // by-kind first so it's visible above the long module list.
+                if (Store.Modules.Any(m => m.IsManaged) || Store.Modules.Any(m => !m.IsManaged))
+                    yield return ("by-kind", true);
                 foreach (var m in Store.Modules)
                     yield return ($"{Sanitize(m.FileName)}.json", false);
+                break;
+
+            case PathKind.ModulesByKindFolder:
+                foreach (var kind in ModuleKinds)
+                {
+                    var wantManaged = kind == "managed";
+                    if (Store.Modules.Any(m => m.IsManaged == wantManaged))
+                        yield return (kind, true);
+                }
+                break;
+
+            case PathKind.ModulesByKindCategoryFolder when info.ModuleKind != null:
+                {
+                    var wantManaged = info.ModuleKind == "managed";
+                    foreach (var m in Store.Modules.Where(x => x.IsManaged == wantManaged))
+                        yield return ($"{Sanitize(m.FileName)}.json", false);
+                }
+                break;
+
+            case PathKind.HeapByGenerationFolder:
+                {
+                    var byGen = Store.HeapTypesByGeneration;
+                    foreach (var gen in GenerationOrder)
+                        if (byGen.ContainsKey(gen))
+                            yield return (gen, true);
+                }
+                break;
+
+            case PathKind.HeapByGenerationTypesFolder when info.Generation != null:
+                if (Store.HeapTypesByGeneration.TryGetValue(info.Generation, out var gtypes))
+                    foreach (var t in gtypes)
+                        yield return ($"{SanitizeFull(t.TypeName)}.json", false);
                 break;
         }
     }
@@ -454,6 +573,10 @@ public sealed class DumpProvider : ProviderBase
                 WriteFolder("types", MakePath(path, "types"), dir,
                     "instance counts and bytes per type, sorted by total bytes",
                     null);
+                if (Store.HeapTypesByGeneration.Count > 0)
+                    WriteFolder("by-generation", MakePath(path, "by-generation"), dir,
+                        "heap types bucketed per GC generation (gen0/gen1/gen2/loh/…)",
+                        Store.HeapTypesByGeneration.Count);
                 break;
             case PathKind.HeapTypesFolder:
                 foreach (var t in Store.HeapTypes)
@@ -550,21 +673,78 @@ public sealed class DumpProvider : ProviderBase
                 }
                 break;
             case PathKind.ModulesFolder:
+                if (Store.Modules.Any())
+                {
+                    var native = Store.Modules.Count(x => !x.IsManaged);
+                    var managed = Store.Modules.Count(x => x.IsManaged);
+                    WriteFolder("by-kind", MakePath(path, "by-kind"), dir,
+                        $"native={native}, managed={managed}", native + managed);
+                }
                 foreach (var m in Store.Modules)
                 {
                     if (Stopping) return;
-                    var mPath = MakePath(path, $"{Sanitize(m.FileName)}.json");
-                    WriteItemObject(new ModuleItem
+                    WriteModuleItem(m, MakePath(path, $"{Sanitize(m.FileName)}.json"), dir);
+                }
+                break;
+
+            case PathKind.ModulesByKindFolder:
+                foreach (var kind in ModuleKinds)
+                {
+                    if (Stopping) return;
+                    var wantManaged = kind == "managed";
+                    var cnt = Store.Modules.Count(m => m.IsManaged == wantManaged);
+                    if (cnt == 0) continue;
+                    WriteFolder(kind, MakePath(path, kind), dir,
+                        kind == "native" ? "PE modules seen by the OS loader"
+                                         : "managed assemblies (CLR runtime)",
+                        cnt);
+                }
+                break;
+
+            case PathKind.ModulesByKindCategoryFolder when info.ModuleKind != null:
+                {
+                    var wantManaged = info.ModuleKind == "managed";
+                    foreach (var m in Store.Modules.Where(x => x.IsManaged == wantManaged))
                     {
-                        Name = m.Name,
-                        FileName = m.FileName,
-                        Size = m.Size,
-                        ImageBaseHex = $"0x{m.ImageBase:X16}",
-                        IsDynamic = m.IsDynamic,
-                        IsManaged = m.IsManaged,
-                        Path = EnsureDrivePrefix(mPath),
-                        Directory = dir,
-                    }, mPath, isContainer: false);
+                        if (Stopping) return;
+                        WriteModuleItem(m, MakePath(path, $"{Sanitize(m.FileName)}.json"), dir);
+                    }
+                }
+                break;
+
+            case PathKind.HeapByGenerationFolder:
+                {
+                    var byGen = Store.HeapTypesByGeneration;
+                    foreach (var gen in GenerationOrder)
+                    {
+                        if (Stopping) return;
+                        if (!byGen.TryGetValue(gen, out var lst)) continue;
+                        var totalBytes = lst.Sum(t => t.TotalBytes);
+                        var totalInst = lst.Sum(t => (long)t.InstanceCount);
+                        WriteFolder(gen, MakePath(path, gen), dir,
+                            $"{totalInst} objects, {totalBytes} B", lst.Count);
+                    }
+                }
+                break;
+
+            case PathKind.HeapByGenerationTypesFolder when info.Generation != null:
+                if (Store.HeapTypesByGeneration.TryGetValue(info.Generation, out var types))
+                {
+                    foreach (var t in types)
+                    {
+                        if (Stopping) return;
+                        var tName = $"{SanitizeFull(t.TypeName)}.json";
+                        var tPath = MakePath(path, tName);
+                        WriteItemObject(new HeapTypeItem
+                        {
+                            Name = tName,
+                            TypeName = t.TypeName,
+                            InstanceCount = t.InstanceCount,
+                            TotalBytes = t.TotalBytes,
+                            Path = EnsureDrivePrefix(tPath),
+                            Directory = dir,
+                        }, tPath, isContainer: false);
+                    }
                 }
                 break;
         }
@@ -598,6 +778,11 @@ public sealed class DumpProvider : ProviderBase
                 => Store.HeapTypes.FirstOrDefault(t =>
                     SanitizeFull(t.TypeName).Equals(info.TypeName, StringComparison.Ordinal)) is { } stats
                     ? JsonSerializer.Serialize(stats, TraceJson.Options) : "{}",
+            PathKind.HeapByGenerationTypeFile when info.Generation != null && info.TypeName != null
+                => Store.HeapTypesByGeneration.TryGetValue(info.Generation, out var glst)
+                    && glst.FirstOrDefault(t => SanitizeFull(t.TypeName)
+                        .Equals(info.TypeName, StringComparison.Ordinal)) is { } gstats
+                    ? JsonSerializer.Serialize(gstats, TraceJson.Options) : "{}",
             _ => "",
         };
     }
@@ -767,6 +952,23 @@ public sealed class DumpProvider : ProviderBase
                 sb.Append('_');
         }
         return sb.ToString();
+    }
+
+    /// <summary>Shared emit for a module row — used by the flat modules\
+    /// listing and by modules\by-kind\&lt;kind&gt;\.</summary>
+    private void WriteModuleItem(DumpModuleInfo m, string itemPath, string dir)
+    {
+        WriteItemObject(new ModuleItem
+        {
+            Name = m.Name,
+            FileName = m.FileName,
+            Size = m.Size,
+            ImageBaseHex = $"0x{m.ImageBase:X16}",
+            IsDynamic = m.IsDynamic,
+            IsManaged = m.IsManaged,
+            Path = EnsureDrivePrefix(itemPath),
+            Directory = dir,
+        }, itemPath, isContainer: false);
     }
 
     /// <summary>Shared emit for a thread row — used by the flat
