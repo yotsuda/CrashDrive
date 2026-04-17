@@ -884,9 +884,15 @@ public sealed class DumpProvider : ProviderBase
         sb.AppendLine("- `threads\\<id>\\frames\\<n>.json` — individual stack frames " +
                       "(source location when resolvable)");
         sb.AppendLine("- `threads\\<id>\\stack.txt` — full formatted stack trace");
+        if (withExc.Count > 0)
+            sb.AppendLine("- `threads\\with-exception\\` — jump to threads that hold an exception");
+        sb.AppendLine("- `threads\\by-state\\{finalizer,gc,dead}\\` — filter by thread state");
         sb.AppendLine("- `modules\\` — native + managed modules (unified view)");
+        sb.AppendLine("- `modules\\by-kind\\{native,managed}\\` — split by PE vs CLR");
         sb.AppendLine("- `heap\\types\\` — GC heap instance counts per type " +
                       "(first access walks the heap; can take seconds)");
+        sb.AppendLine("- `heap\\by-generation\\{gen0,gen1,gen2,loh,…}\\` — " +
+                      "heap types bucketed by GC generation (same heap walk)");
         sb.AppendLine("- `analyze.txt` — `!analyze -v` output " +
                       "(first read runs dbgeng analysis; can take 10+ seconds)");
         sb.AppendLine("- `Invoke-CrashCommand` — raw dbgeng escape hatch " +

@@ -821,7 +821,9 @@ public static class TtdPosition
     public static bool IsSymbolicName(string name) => name is
         "start" or "end"
         or "first-exception" or "last-exception"
-        or "last-meaningful-event";
+        or "last-meaningful-event"
+        or "first-module-load" or "last-module-load"
+        or "first-thread-created" or "last-thread-terminated";
 
     private static bool IsHex(string s)
     {

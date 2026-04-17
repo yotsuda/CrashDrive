@@ -439,8 +439,31 @@ public sealed class TtdProvider : ProviderBase
             ? Store.ExceptionEvents[^1].Event.Position : null,
         "last-meaningful-event" => Store.SignificantEvents.Count > 0
             ? Store.SignificantEvents[^1].Event.Position : null,
+        "first-module-load" => FirstEventOfType("ModuleLoaded")?.Position,
+        "last-module-load"  => LastEventOfType("ModuleLoaded")?.Position,
+        "first-thread-created"   => FirstEventOfType("ThreadCreated")?.Position,
+        "last-thread-terminated" => LastEventOfType("ThreadTerminated")?.Position,
         _ => Ttd.TtdPosition.Decode(encoded),
     };
+
+    private Ttd.TtdEvent? FirstEventOfType(string type)
+    {
+        foreach (var e in Store.EventsByPosition)
+            if (e.Event != null && e.Event.Type.Equals(type, StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrEmpty(e.Event.Position))
+                return e.Event;
+        return null;
+    }
+
+    private Ttd.TtdEvent? LastEventOfType(string type)
+    {
+        Ttd.TtdEvent? best = null;
+        foreach (var e in Store.EventsByPosition)
+            if (e.Event != null && e.Event.Type.Equals(type, StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrEmpty(e.Event.Position))
+                best = e.Event;
+        return best;
+    }
 
     /// <summary>Non-null variant for code paths that have already confirmed the
     /// alias resolves (via <see cref="ItemExists"/>). Falls back to the lifetime
@@ -757,6 +780,14 @@ public sealed class TtdProvider : ProviderBase
             case "last-meaningful-event":
                 return Store.SignificantEvents.Count > 0
                     ? $"{Store.SignificantEvents[^1].Event.Type} @ {Store.SignificantEvents[^1].Event.Position}" : "";
+            case "first-module-load":
+                return FirstEventOfType("ModuleLoaded") is { } fml2 ? $"ModuleLoaded @ {fml2.Position}" : "";
+            case "last-module-load":
+                return LastEventOfType("ModuleLoaded") is { } lml2 ? $"ModuleLoaded @ {lml2.Position}" : "";
+            case "first-thread-created":
+                return FirstEventOfType("ThreadCreated") is { } ftc2 ? $"ThreadCreated @ {ftc2.Position}" : "";
+            case "last-thread-terminated":
+                return LastEventOfType("ThreadTerminated") is { } ltt2 ? $"ThreadTerminated @ {ltt2.Position}" : "";
         }
         // Look up event at this encoded hex position.
         var native = Ttd.TtdPosition.Decode(encodedPosition);
@@ -920,6 +951,15 @@ public sealed class TtdProvider : ProviderBase
                 }
                 if (Store.SignificantEvents.Count > 0)
                     yield return ("last-meaningful-event", true);
+                if (FirstEventOfType("ModuleLoaded") != null)
+                    yield return ("first-module-load", true);
+                if (LastEventOfType("ModuleLoaded") != null
+                    && Store.EventsByPosition.Count(e => e.Event?.Type == "ModuleLoaded") > 1)
+                    yield return ("last-module-load", true);
+                if (FirstEventOfType("ThreadCreated") != null)
+                    yield return ("first-thread-created", true);
+                if (LastEventOfType("ThreadTerminated") != null)
+                    yield return ("last-thread-terminated", true);
                 // Encoded positions for every unique event location.
                 var seen = new HashSet<string>();
                 foreach (var ev in Store.Events)
@@ -1298,6 +1338,23 @@ public sealed class TtdProvider : ProviderBase
                         MakePath(path, "last-meaningful-event"), dir,
                         $"{lm.Event.Type} @ {lm.Event.Position}", null);
                 }
+                if (FirstEventOfType("ModuleLoaded") is { } fml)
+                    WriteFolder("first-module-load",
+                        MakePath(path, "first-module-load"), dir,
+                        $"ModuleLoaded @ {fml.Position}", null);
+                if (LastEventOfType("ModuleLoaded") is { } lml
+                    && Store.EventsByPosition.Count(e => e.Event?.Type == "ModuleLoaded") > 1)
+                    WriteFolder("last-module-load",
+                        MakePath(path, "last-module-load"), dir,
+                        $"ModuleLoaded @ {lml.Position}", null);
+                if (FirstEventOfType("ThreadCreated") is { } ftc)
+                    WriteFolder("first-thread-created",
+                        MakePath(path, "first-thread-created"), dir,
+                        $"ThreadCreated @ {ftc.Position}", null);
+                if (LastEventOfType("ThreadTerminated") is { } ltt)
+                    WriteFolder("last-thread-terminated",
+                        MakePath(path, "last-thread-terminated"), dir,
+                        $"ThreadTerminated @ {ltt.Position}", null);
                 var seen = new HashSet<string>();
                 foreach (var ev in Store.Events)
                 {
